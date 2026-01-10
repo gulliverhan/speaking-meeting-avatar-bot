@@ -1,0 +1,2317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting Bot Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-card: #1a1a24;
+            --bg-input: #0d0d12;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --accent-glow: rgba(99, 102, 241, 0.3);
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border: #2a2a3a;
+            --border-focus: #6366f1;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 3rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent) 0%, #a855f7 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-card);
+            border-radius: 20px;
+            font-size: 0.875rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 400px 1fr;
+            gap: 2rem;
+        }
+
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.5rem;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .card-subtitle {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.9375rem;
+            transition: all 0.2s ease;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            font-family: inherit;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
+            color: white;
+            width: 100%;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px var(--accent-glow);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-danger {
+            background: transparent;
+            border: 1px solid var(--error);
+            color: var(--error);
+            padding: 0.5rem 0.75rem;
+            font-size: 0.8125rem;
+        }
+
+        .btn-danger:hover {
+            background: var(--error);
+            color: white;
+        }
+
+        .bots-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .bot-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            transition: all 0.2s ease;
+        }
+
+        .bot-item:hover {
+            border-color: var(--accent);
+        }
+
+        .bot-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.75rem;
+        }
+
+        .bot-name {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .bot-agent {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            background: var(--accent-glow);
+            border-radius: 20px;
+            font-size: 0.75rem;
+            color: var(--accent-hover);
+            margin-top: 0.25rem;
+        }
+
+        .bot-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .bot-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+        }
+
+        .bot-meta-item svg {
+            width: 14px;
+            height: 14px;
+            opacity: 0.7;
+        }
+
+        .bot-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.375rem;
+            padding: 0.25rem 0.625rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .bot-status.active {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+        }
+
+        .bot-status.speaking {
+            background: rgba(99, 102, 241, 0.15);
+            color: var(--accent-hover);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        .logs-container {
+            margin-top: 2rem;
+        }
+
+        .logs {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1rem;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            font-size: 0.8125rem;
+            line-height: 1.8;
+        }
+
+        .log-entry {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        .log-time {
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .log-message {
+            color: var(--text-secondary);
+        }
+
+        .log-message.info { color: var(--accent-hover); }
+        .log-message.success { color: var(--success); }
+        .log-message.error { color: var(--error); }
+
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            padding: 1rem 1.5rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast.success { border-color: var(--success); }
+        .toast.error { border-color: var(--error); }
+
+        .refresh-indicator {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .form-hint {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.375rem;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 0.625rem;
+            cursor: pointer;
+            font-size: 0.9375rem;
+            color: var(--text-primary);
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+
+        .transcription-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.125rem 0.5rem;
+            border-radius: 10px;
+            font-size: 0.6875rem;
+            font-weight: 500;
+            margin-left: 0.5rem;
+        }
+
+        .transcription-badge.recall {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+        }
+
+        .transcription-badge.elevenlabs {
+            background: rgba(99, 102, 241, 0.15);
+            color: var(--accent-hover);
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.5rem;
+        }
+
+        .tab-btn {
+            padding: 0.625rem 1.25rem;
+            background: transparent;
+            border: none;
+            border-radius: 8px 8px 0 0;
+            color: var(--text-muted);
+            font-family: inherit;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-secondary);
+            background: var(--bg-secondary);
+        }
+
+        .tab-btn.active {
+            color: var(--accent-hover);
+            background: var(--bg-card);
+            border-bottom: 2px solid var(--accent);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Avatar Generation */
+        .avatar-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .avatar-item {
+            position: relative;
+            aspect-ratio: 1;
+            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .avatar-item:hover {
+            border-color: var(--accent);
+            transform: scale(1.02);
+        }
+
+        .avatar-item.selected {
+            border-color: var(--success);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.3);
+        }
+
+        .avatar-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .avatar-item .expression-label {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 0.375rem;
+            background: linear-gradient(transparent, rgba(0,0,0,0.8));
+            font-size: 0.6875rem;
+            text-align: center;
+            color: white;
+            font-weight: 500;
+        }
+
+        .avatar-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+        }
+
+        .avatar-placeholder svg {
+            width: 32px;
+            height: 32px;
+            margin-bottom: 0.5rem;
+            opacity: 0.5;
+        }
+
+        .prompt-preview {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+
+        .prompt-preview img {
+            width: 100%;
+            max-height: 300px;
+            object-fit: contain;
+            border-radius: 8px;
+        }
+
+        .preview-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 200px;
+            color: var(--text-muted);
+        }
+
+        .preview-placeholder svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 1rem;
+            opacity: 0.3;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            flex: 1;
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-card);
+            border-color: var(--accent);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+            color: white;
+            flex: 1;
+        }
+
+        .btn-success:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3);
+        }
+
+        textarea {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.9375rem;
+            resize: vertical;
+            min-height: 80px;
+            transition: all 0.2s ease;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .agent-section {
+            margin-bottom: 2rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .agent-section:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .generating-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            padding: 2rem;
+            color: var(--text-secondary);
+        }
+
+        .generating-indicator svg {
+            animation: spin 1s linear infinite;
+        }
+
+        /* Two-Step Workflow */
+        .step-indicator {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .step {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            font-size: 0.8125rem;
+            color: var(--text-muted);
+            flex: 1;
+        }
+
+        .step.active {
+            background: var(--accent-glow);
+            color: var(--accent-hover);
+        }
+
+        .step.completed {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+        }
+
+        .step-number {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: var(--bg-card);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.75rem;
+        }
+
+        .step.active .step-number {
+            background: var(--accent);
+            color: white;
+        }
+
+        .step.completed .step-number {
+            background: var(--success);
+            color: white;
+        }
+
+        .step-content {
+            display: none;
+        }
+
+        .step-content.active {
+            display: block;
+        }
+
+        /* Expression Editor */
+        .expression-grid-editor {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 1rem;
+        }
+
+        .expression-card {
+            background: var(--bg-secondary);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .expression-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+
+        .expression-card.has-image {
+            border-color: var(--success);
+        }
+
+        .expression-card.generating {
+            pointer-events: none;
+            opacity: 0.7;
+        }
+
+        .expression-card-image {
+            aspect-ratio: 1;
+            background: var(--bg-input);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .expression-card-image img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .expression-card-placeholder {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            text-align: center;
+        }
+
+        .expression-card-placeholder svg {
+            width: 32px;
+            height: 32px;
+            margin-bottom: 0.5rem;
+            opacity: 0.5;
+        }
+
+        .expression-card-footer {
+            padding: 0.5rem 0.75rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid var(--border);
+        }
+
+        .expression-card-name {
+            font-size: 0.8125rem;
+            font-weight: 500;
+            text-transform: capitalize;
+        }
+
+        .expression-card-status {
+            font-size: 0.6875rem;
+            color: var(--text-muted);
+        }
+
+        .expression-card.has-image .expression-card-status {
+            color: var(--success);
+        }
+
+        .expression-card .spinner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 32px;
+            height: 32px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.2s ease;
+        }
+
+        .modal-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.5rem;
+            max-width: 500px;
+            width: 90%;
+            transform: scale(0.9);
+            transition: transform 0.2s ease;
+        }
+
+        .modal-overlay.show .modal {
+            transform: scale(1);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .modal-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1.5rem;
+            line-height: 1;
+            padding: 0.25rem;
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        .modal-preview {
+            width: 150px;
+            height: 150px;
+            margin: 0 auto 1rem;
+            border-radius: 12px;
+            overflow: hidden;
+            background: var(--bg-secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <div class="logo-icon">🤖</div>
+                <div>
+                    <h1>Meeting Bot Dashboard</h1>
+                </div>
+            </div>
+            <div class="status-indicator">
+                <div class="status-dot"></div>
+                <span>Server Online</span>
+            </div>
+        </header>
+
+        <!-- Main Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="deploy">🚀 Deploy</button>
+            <button class="tab-btn" data-tab="agents">🎨 Agents</button>
+        </div>
+
+        <!-- Deploy Tab -->
+        <div class="tab-content active" id="tab-deploy">
+        <div class="grid">
+            <div class="sidebar">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">Deploy Bot</div>
+                            <div class="card-subtitle">Send an AI agent to your meeting</div>
+                        </div>
+                    </div>
+
+                    <form id="create-form">
+                        <div class="form-group">
+                            <label for="meeting-url">Meeting URL</label>
+                            <input 
+                                type="url" 
+                                id="meeting-url" 
+                                placeholder="https://meet.google.com/xxx-yyyy-zzz"
+                                required
+                            >
+                        </div>
+
+                        <div class="form-group">
+                            <label for="agent-select">Agent Type</label>
+                            <select id="agent-select">
+                                <option value="meeting_facilitator">Meeting Facilitator</option>
+                                <option value="case_study_interviewer">Case Study Interviewer</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="audio-mode">Mode</label>
+                            <select id="audio-mode">
+                                <option value="browser_sdk">Normal</option>
+                                <option value="audio_test">Audio Test (test sounds only)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="speaker-context">
+                                <span>Enable speaker context</span>
+                            </label>
+                            <div class="form-hint">Tells the AI who is speaking (e.g., "[John is speaking]")</div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" id="deploy-btn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                            </svg>
+                            Deploy Bot
+                        </button>
+                    </form>
+                </div>
+
+                <div class="card logs-container">
+                    <div class="card-header">
+                        <div class="card-title">Activity Log</div>
+                    </div>
+                    <div class="logs" id="logs">
+                        <div class="log-entry">
+                            <span class="log-time">--:--:--</span>
+                            <span class="log-message">Dashboard loaded</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="main">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">Active Bots</div>
+                            <div class="card-subtitle">Currently running meeting agents</div>
+                        </div>
+                        <span class="refresh-indicator" id="last-refresh">Updated just now</span>
+                    </div>
+
+                    <div class="bots-list" id="bots-list">
+                        <div class="empty-state">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <rect x="3" y="4" width="18" height="16" rx="2"/>
+                                <circle cx="9" cy="10" r="2"/>
+                                <circle cx="15" cy="10" r="2"/>
+                                <path d="M9 16h6"/>
+                            </svg>
+                            <p>No active bots</p>
+                            <p style="font-size: 0.875rem; margin-top: 0.5rem;">Deploy a bot to get started</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Agent Sync Section -->
+                <div class="card" style="margin-top: 1.5rem;">
+                    <div class="card-header">
+                        <div>
+                            <div class="card-title">🔄 ElevenLabs Agent Sync</div>
+                            <div class="card-subtitle">Upload local agents to ElevenLabs (prefix: recall_)</div>
+                        </div>
+                    </div>
+
+                    <div class="agents-list" id="agents-list">
+                        <div class="empty-state">
+                            <p>Loading agents...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <!-- Agents Tab -->
+        <div class="tab-content" id="tab-agents">
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <div class="card-title">🎨 Avatar Generation</div>
+                        <div class="card-subtitle">Create AI-generated avatars for your agents</div>
+                    </div>
+                </div>
+
+                <div id="avatar-agents-container">
+                    <div class="empty-state">
+                        <p>Loading agents...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <!-- Expression Editor Modal -->
+    <div class="modal-overlay" id="expression-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modal-title">Edit Expression</h3>
+                <button class="modal-close" onclick="closeExpressionModal()">&times;</button>
+            </div>
+            <div class="modal-preview" id="modal-preview">
+                <div class="expression-card-placeholder">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/>
+                        <circle cx="9" cy="9" r="1.5"/>
+                        <path d="M21 15l-5-5L5 21"/>
+                    </svg>
+                    <div>No image yet</div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Expression Prompt Override</label>
+                <textarea id="modal-prompt" placeholder="Leave empty to use default expression modifier, or customize the prompt for this expression..."></textarea>
+                <p class="form-hint" id="modal-hint">Default: "with a calm, neutral expression"</p>
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-secondary" onclick="closeExpressionModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="generateSingleExpression()" id="modal-generate-btn">
+                    ✨ Generate
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        const logsEl = document.getElementById('logs');
+        const botsListEl = document.getElementById('bots-list');
+        const createForm = document.getElementById('create-form');
+        const deployBtn = document.getElementById('deploy-btn');
+        const toastEl = document.getElementById('toast');
+        const lastRefreshEl = document.getElementById('last-refresh');
+
+        function log(message, type = '') {
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `
+                <span class="log-time">${time}</span>
+                <span class="log-message ${type}">${message}</span>
+            `;
+            logsEl.appendChild(entry);
+            logsEl.scrollTop = logsEl.scrollHeight;
+        }
+
+        function showToast(message, type = '') {
+            toastEl.textContent = message;
+            toastEl.className = `toast show ${type}`;
+            setTimeout(() => {
+                toastEl.className = 'toast';
+            }, 3000);
+        }
+
+        function truncateUrl(url, maxLength = 40) {
+            if (url.length <= maxLength) return url;
+            return url.substring(0, maxLength) + '...';
+        }
+
+        function renderBots(bots) {
+            if (!bots || bots.length === 0) {
+                botsListEl.innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <rect x="3" y="4" width="18" height="16" rx="2"/>
+                            <circle cx="9" cy="10" r="2"/>
+                            <circle cx="15" cy="10" r="2"/>
+                            <path d="M9 16h6"/>
+                        </svg>
+                        <p>No active bots</p>
+                        <p style="font-size: 0.875rem; margin-top: 0.5rem;">Deploy a bot to get started</p>
+                    </div>
+                `;
+                return;
+            }
+
+            botsListEl.innerHTML = bots.map(bot => `
+                <div class="bot-item" data-id="${bot.bot_id}">
+                    <div class="bot-header">
+                        <div>
+                            <div class="bot-name">
+                                ${bot.bot_name || 'AI Assistant'}
+                                ${bot.audio_mode === 'audio_test' ? '<span class="transcription-badge recall">🔊 Audio Test</span>' : ''}
+                                ${bot.speaker_context ? '<span class="transcription-badge recall">👤 Speaker IDs</span>' : ''}
+                            </div>
+                            <div class="bot-agent">${bot.agent_name}</div>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <span class="bot-status ${bot.wants_to_speak ? 'speaking' : 'active'}">
+                                ${bot.wants_to_speak ? '✋ Wants to speak' : '● Active'}
+                            </span>
+                            <button class="btn btn-danger" onclick="removeBot('${bot.bot_id}')">
+                                Stop
+                            </button>
+                        </div>
+                    </div>
+                    <div class="bot-meta">
+                        <div class="bot-meta-item">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                            </svg>
+                            <span>${truncateUrl(bot.meeting_url)}</span>
+                        </div>
+                        <div class="bot-meta-item">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M12 6v6l4 2"/>
+                            </svg>
+                            <span>Expression: ${bot.current_expression || 'neutral'}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function fetchBots() {
+            try {
+                const response = await fetch(`${API_BASE}/bots`);
+                if (response.ok) {
+                    const bots = await response.json();
+                    renderBots(bots);
+                    lastRefreshEl.textContent = 'Updated just now';
+                }
+            } catch (error) {
+                console.error('Error fetching bots:', error);
+            }
+        }
+
+        async function fetchAgents() {
+            try {
+                const response = await fetch(`${API_BASE}/agents`);
+                if (response.ok) {
+                    const agents = await response.json();
+                    const select = document.getElementById('agent-select');
+                    if (agents.length > 0) {
+                        select.innerHTML = agents.map(agent => 
+                            `<option value="${agent}">${agent.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</option>`
+                        ).join('');
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching agents:', error);
+            }
+        }
+
+        async function createBot(meetingUrl, agentName, audioMode, speakerContext) {
+            try {
+                const response = await fetch(`${API_BASE}/bots`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        meeting_url: meetingUrl,
+                        agent_name: agentName,
+                        audio_mode: audioMode,
+                        speaker_context: speakerContext,
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    log(`Bot deployed: ${data.bot_id}`, 'success');
+                    showToast('Bot deployed successfully!', 'success');
+                    fetchBots();
+                    return true;
+                } else {
+                    log(`Error: ${data.message}`, 'error');
+                    showToast(data.message || 'Failed to deploy bot', 'error');
+                    return false;
+                }
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+                showToast('Network error', 'error');
+                return false;
+            }
+        }
+
+        async function removeBot(botId) {
+            try {
+                log(`Stopping bot ${botId.substring(0, 8)}...`, 'info');
+                const response = await fetch(`${API_BASE}/bots/${botId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    log(`Bot stopped: ${botId.substring(0, 8)}`, 'success');
+                    showToast('Bot stopped successfully', 'success');
+                    fetchBots();
+                } else {
+                    log(`Error stopping bot: ${data.message}`, 'error');
+                    showToast(data.message || 'Failed to stop bot', 'error');
+                }
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+                showToast('Network error', 'error');
+            }
+        }
+
+        createForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const meetingUrl = document.getElementById('meeting-url').value;
+            const agentName = document.getElementById('agent-select').value;
+            const audioMode = document.getElementById('audio-mode').value;
+            const speakerContext = document.getElementById('speaker-context').checked;
+
+            deployBtn.disabled = true;
+            deployBtn.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin 1s linear infinite;">
+                    <circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="20"/>
+                </svg>
+                Deploying...
+            `;
+
+            log(`Deploying ${agentName}${speakerContext ? ' with speaker context' : ''}...`, 'info');
+
+            const success = await createBot(meetingUrl, agentName, audioMode, speakerContext);
+            
+            deployBtn.disabled = false;
+            deployBtn.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                </svg>
+                Deploy Bot
+            `;
+
+            if (success) {
+                document.getElementById('meeting-url').value = '';
+            }
+        });
+
+        // Add spin animation
+        const style = document.createElement('style');
+        style.textContent = `@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`;
+        document.head.appendChild(style);
+
+        // =====================================================
+        // Agent Sync Functions
+        // =====================================================
+        
+        const agentsListEl = document.getElementById('agents-list');
+
+        function renderAgentSync(agents) {
+            if (!agents || agents.length === 0) {
+                agentsListEl.innerHTML = `
+                    <div class="empty-state">
+                        <p>No local agents found</p>
+                    </div>
+                `;
+                return;
+            }
+
+            agentsListEl.innerHTML = agents.map(agent => `
+                <div class="bot-item" style="padding: 1rem;">
+                    <div class="bot-header">
+                        <div>
+                            <div class="bot-name">
+                                ${agent.display_name}
+                                ${agent.synced 
+                                    ? '<span class="transcription-badge recall">✓ Synced</span>' 
+                                    : '<span class="transcription-badge elevenlabs">Not synced</span>'
+                                }
+                            </div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                                Local: ${agent.name}
+                                ${agent.elevenlabs_agent_id ? ` → ElevenLabs: ${agent.elevenlabs_agent_id.substring(0, 20)}...` : ''}
+                            </div>
+                            ${agent.updated_at ? `
+                                <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                                    Last synced: ${new Date(agent.updated_at).toLocaleString()}
+                                </div>
+                            ` : ''}
+                        </div>
+                        <button class="btn btn-primary" style="padding: 0.5rem 1rem; font-size: 0.8125rem;" 
+                                onclick="syncAgent('${agent.name}')" id="sync-btn-${agent.name}">
+                            ${agent.synced ? '🔄 Update' : '⬆️ Upload'}
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function fetchAgentSyncStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/agents/sync-status`);
+                if (response.ok) {
+                    const agents = await response.json();
+                    renderAgentSync(agents);
+                }
+            } catch (error) {
+                console.error('Error fetching agent sync status:', error);
+                agentsListEl.innerHTML = `
+                    <div class="empty-state">
+                        <p style="color: var(--error);">Failed to load agents</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function syncAgent(agentName) {
+            const btn = document.getElementById(`sync-btn-${agentName}`);
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Syncing...';
+
+            log(`Syncing agent: ${agentName}...`, 'info');
+
+            try {
+                const response = await fetch(`${API_BASE}/agents/${agentName}/sync`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    log(`Agent ${agentName} ${data.action}: ${data.agent_id}`, 'success');
+                    showToast(`Agent ${data.action} successfully!`, 'success');
+                    fetchAgentSyncStatus();
+                } else {
+                    log(`Failed to sync ${agentName}: ${data.message}`, 'error');
+                    showToast(data.message || 'Sync failed', 'error');
+                }
+            } catch (error) {
+                log(`Error syncing ${agentName}: ${error.message}`, 'error');
+                showToast('Network error', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        // =====================================================
+        // Tab Navigation
+        // =====================================================
+        
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                // Update buttons
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                // Update content
+                const tabId = btn.dataset.tab;
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                document.getElementById(`tab-${tabId}`).classList.add('active');
+                
+                // Load avatar agents when switching to agents tab
+                if (tabId === 'agents') {
+                    loadAvatarAgents();
+                }
+            });
+        });
+
+        // =====================================================
+        // Avatar Generation Functions (Two-Step Workflow)
+        // =====================================================
+        
+        const avatarContainer = document.getElementById('avatar-agents-container');
+        
+        // State for each agent
+        const agentStates = {};
+        
+        // Modal state
+        let modalAgent = null;
+        let modalExpression = null;
+        
+        // Cached voices
+        let availableVoices = [];
+
+        // Load available voices from ElevenLabs
+        async function loadVoices() {
+            try {
+                const response = await fetch(`${API_BASE}/voices`);
+                if (response.ok) {
+                    const data = await response.json();
+                    availableVoices = data.voices || [];
+                    log(`Loaded ${availableVoices.length} voices from ElevenLabs`, 'info');
+                    return availableVoices;
+                }
+            } catch (error) {
+                console.error('Error loading voices:', error);
+            }
+            return [];
+        }
+
+        // Populate voice dropdown for an agent (both Step 1 and Step 2)
+        function populateVoiceDropdown(agentName, selectedVoiceId) {
+            const selects = [
+                document.getElementById(`voice-${agentName}`),
+                document.getElementById(`voice-step2-${agentName}`)
+            ].filter(s => s);
+            
+            if (selects.length === 0) return;
+            
+            const optionsHtml = availableVoices.length === 0 
+                ? '<option value="">No voices available</option>'
+                : availableVoices.map(voice => `
+                    <option value="${voice.voice_id}" ${voice.voice_id === selectedVoiceId ? 'selected' : ''}>
+                        ${voice.name} ${voice.category ? `(${voice.category})` : ''}
+                    </option>
+                `).join('');
+            
+            selects.forEach(select => {
+                select.innerHTML = optionsHtml;
+            });
+        }
+
+        // Sync voice ID input when dropdown changes
+        function syncVoiceId(agentName, voiceId) {
+            // Update all voice ID inputs
+            const inputs = [
+                document.getElementById(`voice-id-${agentName}`),
+                document.getElementById(`voice-id-step2-${agentName}`)
+            ].filter(i => i);
+            inputs.forEach(input => input.value = voiceId);
+            
+            // Update state
+            if (agentStates[agentName]) {
+                agentStates[agentName].voiceId = voiceId;
+            }
+        }
+
+        // Sync voice dropdown when custom ID is entered
+        function syncVoiceSelect(agentName, customId) {
+            // Update all dropdowns - select the option if it exists, otherwise leave as custom
+            const selects = [
+                document.getElementById(`voice-${agentName}`),
+                document.getElementById(`voice-step2-${agentName}`)
+            ].filter(s => s);
+            
+            selects.forEach(select => {
+                const option = Array.from(select.options).find(o => o.value === customId);
+                if (option) {
+                    select.value = customId;
+                } else {
+                    select.value = ''; // Deselect if custom ID not in list
+                }
+            });
+            
+            // Update all ID inputs to match
+            const inputs = [
+                document.getElementById(`voice-id-${agentName}`),
+                document.getElementById(`voice-id-step2-${agentName}`)
+            ].filter(i => i);
+            inputs.forEach(input => input.value = customId);
+            
+            // Update state
+            if (agentStates[agentName]) {
+                agentStates[agentName].voiceId = customId;
+            }
+        }
+
+        // Get the voice ID (from custom input or dropdown)
+        function getVoiceId(agentName) {
+            // Prefer custom ID input if filled
+            const customId = document.getElementById(`voice-id-${agentName}`)?.value.trim()
+                          || document.getElementById(`voice-id-step2-${agentName}`)?.value.trim();
+            if (customId) return customId;
+            
+            // Fall back to dropdown
+            return document.getElementById(`voice-${agentName}`)?.value
+                || document.getElementById(`voice-step2-${agentName}`)?.value
+                || '';
+        }
+
+        // Toggle custom background input visibility
+        function toggleBackgroundInput(agentName) {
+            const typeSelect = document.getElementById(`background-type-${agentName}`);
+            const customInput = document.getElementById(`background-custom-${agentName}`);
+            
+            if (typeSelect && customInput) {
+                customInput.style.display = typeSelect.value === 'custom' ? 'block' : 'none';
+                
+                // Update state
+                if (agentStates[agentName]) {
+                    agentStates[agentName].backgroundType = typeSelect.value;
+                    if (typeSelect.value === 'custom') {
+                        agentStates[agentName].customBackground = customInput.value.trim();
+                    }
+                }
+            }
+        }
+
+        // Get background settings for expression generation
+        function getBackgroundSettings(agentName) {
+            const typeSelect = document.getElementById(`background-type-${agentName}`);
+            const customInput = document.getElementById(`background-custom-${agentName}`);
+            
+            const backgroundType = typeSelect?.value || 'none';
+            const customBackground = customInput?.value.trim() || '';
+            
+            // Update state
+            if (agentStates[agentName]) {
+                agentStates[agentName].backgroundType = backgroundType;
+                agentStates[agentName].customBackground = customBackground;
+            }
+            
+            return { backgroundType, customBackground };
+        }
+
+        // Restore background settings from state after re-render
+        function restoreBackgroundSettings(agentName) {
+            const state = agentStates[agentName];
+            if (!state) return;
+            
+            const typeSelect = document.getElementById(`background-type-${agentName}`);
+            const customInput = document.getElementById(`background-custom-${agentName}`);
+            
+            if (typeSelect && state.backgroundType) {
+                typeSelect.value = state.backgroundType;
+            }
+            
+            if (customInput && state.customBackground) {
+                customInput.value = state.customBackground;
+            }
+            
+            // Show/hide custom input based on selection
+            if (customInput && typeSelect) {
+                customInput.style.display = typeSelect.value === 'custom' ? 'block' : 'none';
+            }
+        }
+
+        // Preview a voice using ElevenLabs TTS
+        let currentAudio = null;
+        async function previewVoice(agentName) {
+            const voiceId = getVoiceId(agentName);
+            if (!voiceId) {
+                showToast('Please select a voice first', 'error');
+                return;
+            }
+            
+            // Find voice name
+            const voice = availableVoices.find(v => v.voice_id === voiceId);
+            const voiceName = voice?.name || 'this voice';
+            
+            // Stop any currently playing audio
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            
+            log(`Previewing voice: ${voiceName}...`, 'info');
+            showToast(`Loading voice preview...`, 'info');
+            
+            try {
+                const response = await fetch(`${API_BASE}/voices/${voiceId}/preview`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: `Hello! My name is ${voiceName}. I'm excited to be your meeting assistant today.`
+                    }),
+                });
+                
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    currentAudio = new Audio(url);
+                    currentAudio.play();
+                    log(`Playing voice preview: ${voiceName}`, 'success');
+                } else {
+                    const data = await response.json();
+                    log(`Failed to preview voice: ${data.message}`, 'error');
+                    showToast(data.message || 'Preview failed', 'error');
+                }
+            } catch (error) {
+                log(`Error previewing voice: ${error.message}`, 'error');
+                showToast('Preview failed', 'error');
+            }
+        }
+
+        // Show/hide reference image upload based on model
+        function updateModelHint(agentName) {
+            const modelId = document.getElementById(`model-${agentName}`).value;
+            const refGroup = document.getElementById(`ref-image-group-${agentName}`);
+            if (refGroup) {
+                refGroup.style.display = modelId !== 'p-image' ? 'block' : 'none';
+            }
+            if (agentStates[agentName]) {
+                agentStates[agentName].model = modelId;
+            }
+        }
+
+        // Handle reference image upload
+        async function handleRefImageUpload(agentName, input) {
+            const file = input.files?.[0];
+            if (!file) return;
+            
+            // Check file size (max 10MB)
+            if (file.size > 10 * 1024 * 1024) {
+                showToast('Image too large (max 10MB)', 'error');
+                return;
+            }
+            
+            log(`Uploading reference image for ${agentName}...`, 'info');
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const response = await fetch(`${API_BASE}/agents/${agentName}/upload-reference`, {
+                    method: 'POST',
+                    body: formData,
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.url) {
+                    agentStates[agentName].referenceImage = data.url;
+                    
+                    // Update preview
+                    const preview = document.getElementById(`ref-preview-${agentName}`);
+                    preview.innerHTML = `<img src="${data.url}" style="width: 100%; height: 100%; object-fit: cover;">`;
+                    
+                    // Enable clear button
+                    document.getElementById(`clear-ref-${agentName}`).disabled = false;
+                    
+                    log(`Reference image uploaded for ${agentName}`, 'success');
+                    showToast('Reference image uploaded!', 'success');
+                } else {
+                    log(`Failed to upload: ${data.message}`, 'error');
+                    showToast(data.message || 'Upload failed', 'error');
+                }
+            } catch (error) {
+                log(`Error uploading: ${error.message}`, 'error');
+                showToast('Upload failed', 'error');
+            }
+            
+            // Clear input
+            input.value = '';
+        }
+
+        // Clear reference image
+        function clearRefImage(agentName) {
+            if (agentStates[agentName]) {
+                agentStates[agentName].referenceImage = null;
+            }
+            
+            const preview = document.getElementById(`ref-preview-${agentName}`);
+            preview.innerHTML = `<span style="font-size: 0.7rem; color: var(--text-muted); text-align: center;">No image</span>`;
+            
+            document.getElementById(`clear-ref-${agentName}`).disabled = true;
+        }
+
+        // Default expression modifiers
+        const EXPRESSION_MODIFIERS = {
+            neutral: "with a calm, neutral expression, professional demeanor",
+            happy: "with a warm, genuine smile, eyes slightly crinkled with joy",
+            thinking: "with a thoughtful expression, slightly furrowed brow, looking contemplative",
+            interested: "with an engaged, attentive expression, eyebrows slightly raised, showing curiosity",
+            curious: "with a curious expression, head slightly tilted, eyes wide with interest",
+            encouraging: "with an encouraging, supportive expression, warm smile",
+            thoughtful: "with a deep thinking expression, chin slightly raised",
+        };
+
+        async function loadAvatarAgents() {
+            try {
+                // Load voices if not already loaded
+                if (availableVoices.length === 0) {
+                    await loadVoices();
+                }
+                
+                const response = await fetch(`${API_BASE}/agents/avatar-status`);
+                if (response.ok) {
+                    const agents = await response.json();
+                    // Initialize state for each agent
+                    agents.forEach(agent => {
+                        if (!agentStates[agent.name]) {
+                            agentStates[agent.name] = {
+                                step: agent.has_base_avatar ? 2 : 1,
+                                baseImage: agent.base_image_url || null,  // Load saved base image
+                                prompt: agent.avatar_prompt || '',
+                                model: 'nano-banana-pro',  // Default to best model for consistency
+                                voiceId: agent.voice_id || '',
+                                avatarName: agent.avatar_name || '',  // Load saved avatar name
+                                generatingExpressions: {},
+                                backgroundType: 'none',  // Persist background settings
+                                customBackground: ''
+                            };
+                        } else if (agent.base_image_url && !agentStates[agent.name].baseImage) {
+                            // If state exists but doesn't have baseImage, load it from server
+                            agentStates[agent.name].baseImage = agent.base_image_url;
+                        }
+                    });
+                    renderAvatarAgents(agents);
+                    
+                    // Populate voice dropdowns and restore background settings after render
+                    agents.forEach(agent => {
+                        populateVoiceDropdown(agent.name, agent.voice_id || agentStates[agent.name]?.voiceId);
+                        restoreBackgroundSettings(agent.name);
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching avatar agents:', error);
+                avatarContainer.innerHTML = `
+                    <div class="empty-state">
+                        <p style="color: var(--error);">Failed to load agents</p>
+                    </div>
+                `;
+            }
+        }
+
+        function renderAvatarAgents(agents) {
+            if (!agents || agents.length === 0) {
+                avatarContainer.innerHTML = `
+                    <div class="empty-state">
+                        <p>No agents found</p>
+                    </div>
+                `;
+                return;
+            }
+
+            avatarContainer.innerHTML = agents.map(agent => {
+                const state = agentStates[agent.name] || { step: 1 };
+                const expressions = agent.expressions || ['neutral', 'happy', 'thinking', 'interested'];
+                
+                return `
+                <div class="agent-section" data-agent="${agent.name}">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
+                        <div>
+                            <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 0.25rem;">
+                                ${agent.display_name}
+                            </h3>
+                            <p style="font-size: 0.8125rem; color: var(--text-muted);">
+                                ${expressions.length} expressions: ${expressions.join(', ')}
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Step Indicator -->
+                    <div class="step-indicator">
+                        <div class="step ${state.step === 1 ? 'active' : state.step > 1 ? 'completed' : ''}">
+                            <span class="step-number">${state.step > 1 ? '✓' : '1'}</span>
+                            <span>Base Avatar</span>
+                        </div>
+                        <div class="step ${state.step === 2 ? 'active' : ''}">
+                            <span class="step-number">2</span>
+                            <span>Expressions</span>
+                        </div>
+                    </div>
+
+                    <!-- Step 1: Generate Base Avatar -->
+                    <div class="step-content ${state.step === 1 ? 'active' : ''}" id="step1-${agent.name}">
+                        <div class="form-group">
+                            <label>Avatar Name</label>
+                            <input type="text" id="avatar-name-${agent.name}" placeholder="e.g., Sarah, Alex, Dr. Smith..." value="${agent.avatar_name || ''}">
+                            <p class="form-hint">Give your avatar a name (used in prompts for consistency)</p>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Voice</label>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <select id="voice-${agent.name}" style="flex: 1;" onchange="syncVoiceId('${agent.name}', this.value)">
+                                    <option value="">Loading voices...</option>
+                                </select>
+                                <button class="btn btn-secondary" style="padding: 0.5rem 0.75rem; flex-shrink: 0;" 
+                                        onclick="previewVoice('${agent.name}')" title="Preview voice">
+                                    🔊
+                                </button>
+                            </div>
+                            <input type="text" id="voice-id-${agent.name}" placeholder="Or paste custom voice ID..." 
+                                   value="${agent.voice_id || ''}" style="margin-top: 0.5rem; font-size: 0.8125rem;"
+                                   onchange="syncVoiceSelect('${agent.name}', this.value)">
+                            <p class="form-hint">Select from dropdown or paste a custom voice ID</p>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Image Model</label>
+                            <select id="model-${agent.name}" style="width: 100%;" onchange="updateModelHint('${agent.name}')"
+                                <option value="p-image" ${state.model === 'p-image' ? 'selected' : ''}>⚡ P-Image (fast & cheap)</option>
+                                <option value="nano-banana" ${state.model === 'nano-banana' ? 'selected' : ''}>🍌 Nano Banana (+ reference image)</option>
+                                <option value="nano-banana-pro" ${state.model === 'nano-banana-pro' ? 'selected' : ''}>🍌✨ Nano Banana Pro (best + reference)</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Reference Image Upload -->
+                        <div class="form-group" id="ref-image-group-${agent.name}" style="display: ${state.model !== 'p-image' ? 'block' : 'none'};">
+                            <label>Reference Image (optional)</label>
+                            <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
+                                <div id="ref-preview-${agent.name}" style="width: 80px; height: 80px; border-radius: 8px; background: var(--bg-secondary); border: 1px solid var(--border); overflow: hidden; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">
+                                    ${state.referenceImage ? `<img src="${state.referenceImage}" style="width: 100%; height: 100%; object-fit: cover;">` : `<span style="font-size: 0.7rem; color: var(--text-muted); text-align: center;">No image</span>`}
+                                </div>
+                                <div style="flex: 1;">
+                                    <input type="file" id="ref-input-${agent.name}" accept="image/*" style="display: none;" onchange="handleRefImageUpload('${agent.name}', this)">
+                                    <button class="btn btn-secondary" style="width: 100%; margin-bottom: 0.5rem;" onclick="document.getElementById('ref-input-${agent.name}').click()">
+                                        📷 Upload Photo
+                                    </button>
+                                    <button class="btn btn-secondary" style="width: 100%; padding: 0.5rem;" onclick="clearRefImage('${agent.name}')" ${state.referenceImage ? '' : 'disabled'} id="clear-ref-${agent.name}">
+                                        ✕ Clear
+                                    </button>
+                                </div>
+                            </div>
+                            <p class="form-hint">Upload a photo to base your avatar on (Nano Banana models only)</p>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Character Description</label>
+                            <textarea 
+                                id="prompt-${agent.name}" 
+                                placeholder="${state.referenceImage ? 'Describe how to modify or style the reference image...' : 'Describe your avatar character...'}&#10;&#10;Example: A friendly professional woman with short brown hair and warm smile. Corporate headshot style, neutral gray background, professional lighting."
+                            >${agent.avatar_prompt || ''}</textarea>
+                        </div>
+                        
+                        <div class="prompt-preview" id="preview-${agent.name}">
+                            ${state.baseImage ? `
+                                <img src="${state.baseImage}" alt="Generated avatar">
+                            ` : `
+                                <div class="preview-placeholder">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                        <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                        <circle cx="9" cy="9" r="1.5"/>
+                                        <path d="M21 15l-5-5L5 21"/>
+                                    </svg>
+                                    <span>Generated image will appear here</span>
+                                </div>
+                            `}
+                        </div>
+
+                        <div class="btn-group">
+                            <button class="btn btn-secondary" onclick="generateBaseAvatar('${agent.name}')" id="gen-btn-${agent.name}">
+                                ✨ Generate
+                            </button>
+                            <button class="btn btn-success" onclick="approveBaseAvatar('${agent.name}')" id="approve-btn-${agent.name}" ${state.baseImage ? '' : 'disabled'}>
+                                ✓ Use This & Continue
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Generate Expressions -->
+                    <div class="step-content ${state.step === 2 ? 'active' : ''}" id="step2-${agent.name}">
+                        <!-- Editable settings in Step 2 -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);">
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.75rem;">Avatar Name</label>
+                                <input type="text" id="avatar-name-step2-${agent.name}" value="${agent.avatar_name || ''}" 
+                                       placeholder="e.g., Sarah" style="padding: 0.5rem 0.75rem; font-size: 0.875rem;">
+                            </div>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label style="font-size: 0.75rem;">Voice</label>
+                                <select id="voice-step2-${agent.name}" style="padding: 0.5rem 0.75rem; font-size: 0.875rem;"
+                                        onchange="syncVoiceId('${agent.name}', this.value)">
+                                    <option value="">Loading...</option>
+                                </select>
+                                <input type="text" id="voice-id-step2-${agent.name}" placeholder="Or paste ID..." 
+                                       value="${agent.voice_id || ''}" style="margin-top: 0.25rem; font-size: 0.75rem; padding: 0.375rem 0.5rem;"
+                                       onchange="syncVoiceSelect('${agent.name}', this.value)">
+                            </div>
+                        </div>
+                        
+                        <!-- Background Settings -->
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label style="font-size: 0.75rem;">Expression Background</label>
+                            <select id="background-type-${agent.name}" style="padding: 0.5rem 0.75rem; font-size: 0.875rem;"
+                                    onchange="toggleBackgroundInput('${agent.name}')">
+                                <option value="none">No background (model decides)</option>
+                                <option value="match_base">Match base avatar background</option>
+                                <option value="custom">Custom background...</option>
+                            </select>
+                            <input type="text" id="background-custom-${agent.name}" 
+                                   placeholder="e.g., modern office with plants, gradient blue backdrop..." 
+                                   style="margin-top: 0.5rem; display: none; font-size: 0.875rem; padding: 0.5rem 0.75rem;"
+                                   value="${state.customBackground || ''}">
+                        </div>
+                        
+                        <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                            Click any expression to customize and regenerate it.
+                        </p>
+                        
+                        <div class="expression-grid-editor">
+                            ${expressions.map(expr => {
+                                const hasImage = agent.expression_images?.[expr];
+                                const isGenerating = state.generatingExpressions?.[expr];
+                                return `
+                                <div class="expression-card ${hasImage ? 'has-image' : ''} ${isGenerating ? 'generating' : ''}" 
+                                     onclick="openExpressionEditor('${agent.name}', '${expr}')"
+                                     id="expr-card-${agent.name}-${expr}">
+                                    <div class="expression-card-image">
+                                        ${isGenerating ? `
+                                            <div class="spinner"></div>
+                                        ` : hasImage ? `
+                                            <img src="/agents/${agent.name}/expressions/${expr}.png?t=${Date.now()}" alt="${expr}">
+                                        ` : `
+                                            <div class="expression-card-placeholder">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                                    <path d="M12 5v14M5 12h14"/>
+                                                </svg>
+                                                <div>Click to generate</div>
+                                            </div>
+                                        `}
+                                    </div>
+                                    <div class="expression-card-footer">
+                                        <span class="expression-card-name">${expr}</span>
+                                        <span class="expression-card-status">${hasImage ? '✓' : 'Empty'}</span>
+                                    </div>
+                                </div>
+                            `}).join('')}
+                        </div>
+
+                        <div class="btn-group" style="margin-top: 1.5rem;">
+                            <button class="btn btn-secondary" onclick="goToStep1('${agent.name}')" title="Edit base image settings">
+                                ⚙️ Edit Base Settings
+                            </button>
+                            <button class="btn btn-secondary" onclick="saveAgentSettings('${agent.name}')" id="save-settings-btn-${agent.name}">
+                                💾 Save Settings
+                            </button>
+                            ${Object.values(agent.expression_images || {}).filter(v => !v).length > 0 ? `
+                                <button class="btn btn-success" onclick="generateAllExpressions('${agent.name}')" id="gen-all-btn-${agent.name}">
+                                    📦 Generate Missing (${Object.values(agent.expression_images || {}).filter(v => !v).length})
+                                </button>
+                            ` : `
+                                <span style="display: flex; align-items: center; padding: 0 1rem; color: var(--success); font-size: 0.875rem;">
+                                    ✓ All expressions complete
+                                </span>
+                            `}
+                        </div>
+                    </div>
+                </div>
+            `}).join('');
+        }
+
+        // Step 1: Generate base avatar
+        async function generateBaseAvatar(agentName) {
+            const prompt = document.getElementById(`prompt-${agentName}`).value.trim();
+            const modelId = document.getElementById(`model-${agentName}`).value;
+            
+            if (!prompt) {
+                showToast('Please enter a character description', 'error');
+                return;
+            }
+
+            // Update state
+            agentStates[agentName].prompt = prompt;
+            agentStates[agentName].model = modelId;
+
+            const btn = document.getElementById(`gen-btn-${agentName}`);
+            const preview = document.getElementById(`preview-${agentName}`);
+            const approveBtn = document.getElementById(`approve-btn-${agentName}`);
+            
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Generating...';
+            approveBtn.disabled = true;
+            
+            const modelName = modelId === 'p-image' ? 'P-Image' : modelId === 'nano-banana-pro' ? 'Nano Banana Pro' : 'Nano Banana';
+            preview.innerHTML = `
+                <div class="generating-indicator">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="20"/>
+                    </svg>
+                    <span>Generating with ${modelName}...</span>
+                </div>
+            `;
+
+            log(`Generating base avatar for ${agentName}...`, 'info');
+
+            try {
+                const requestBody = { prompt, model_id: modelId };
+                if (agentStates[agentName].referenceImage) {
+                    requestBody.reference_image_url = agentStates[agentName].referenceImage;
+                }
+                
+                const response = await fetch(`${API_BASE}/agents/${agentName}/generate-avatar`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody),
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.image_url) {
+                    preview.innerHTML = `<img src="${data.image_url}" alt="Generated avatar">`;
+                    agentStates[agentName].baseImage = data.image_url;
+                    approveBtn.disabled = false;
+                    log(`Base avatar generated for ${agentName}`, 'success');
+                    showToast('Looking good? Click "Use This & Continue" to proceed.', 'success');
+                } else {
+                    preview.innerHTML = `
+                        <div class="preview-placeholder" style="color: var(--error);">
+                            <p>Failed: ${data.message || 'Unknown error'}</p>
+                        </div>
+                    `;
+                    log(`Failed: ${data.message}`, 'error');
+                    showToast(data.message || 'Generation failed', 'error');
+                }
+            } catch (error) {
+                preview.innerHTML = `
+                    <div class="preview-placeholder" style="color: var(--error);">
+                        <p>Network error</p>
+                    </div>
+                `;
+                log(`Error: ${error.message}`, 'error');
+                showToast('Network error', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '✨ Generate';
+            }
+        }
+
+        // Approve base and move to step 2
+        async function approveBaseAvatar(agentName) {
+            const state = agentStates[agentName];
+            const avatarName = document.getElementById(`avatar-name-${agentName}`)?.value.trim() || '';
+            const voiceId = getVoiceId(agentName);
+            
+            // Save to state
+            state.avatarName = avatarName;
+            state.voiceId = voiceId;
+            
+            // Save the base avatar to the server so it can be used as reference for expressions
+            log(`Saving base avatar for ${agentName}...`, 'info');
+            
+            try {
+                const response = await fetch(`${API_BASE}/agents/${agentName}/save-base-avatar`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image_url: state.baseImage,
+                        avatar_name: avatarName,
+                        prompt: state.prompt,
+                        voice_id: voiceId
+                    }),
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Store the saved base avatar path for expression generation
+                    state.savedBaseAvatar = data.local_path;
+                    log(`Base avatar saved: ${data.local_path}`, 'success');
+                } else {
+                    log(`Warning: Could not save base avatar: ${data.message}`, 'error');
+                }
+            } catch (error) {
+                log(`Warning: Could not save base avatar: ${error.message}`, 'error');
+            }
+            
+            // Move to step 2
+            state.step = 2;
+            document.getElementById(`step1-${agentName}`).classList.remove('active');
+            document.getElementById(`step2-${agentName}`).classList.add('active');
+            
+            // Update step indicator
+            const section = document.querySelector(`[data-agent="${agentName}"]`);
+            const steps = section.querySelectorAll('.step');
+            steps[0].classList.remove('active');
+            steps[0].classList.add('completed');
+            steps[1].classList.add('active');
+            
+            showToast('Base avatar saved! Now generate expressions - they will use your base as reference.', 'success');
+        }
+
+        // Go back to step 1 (just to edit settings, doesn't lose expressions)
+        function goToStep1(agentName) {
+            agentStates[agentName].step = 1;
+            document.getElementById(`step1-${agentName}`).classList.add('active');
+            document.getElementById(`step2-${agentName}`).classList.remove('active');
+            
+            // Update step indicator
+            const section = document.querySelector(`[data-agent="${agentName}"]`);
+            const steps = section.querySelectorAll('.step');
+            steps[0].classList.add('active');
+            steps[0].classList.remove('completed');
+            steps[1].classList.remove('active');
+            
+            // Note: Existing expressions are NOT deleted, this just lets you edit settings
+        }
+
+        // Save agent settings (name, voice) without regenerating anything
+        async function saveAgentSettings(agentName) {
+            const state = agentStates[agentName];
+            
+            // Get values from inputs
+            const avatarName = document.getElementById(`avatar-name-step2-${agentName}`)?.value.trim() 
+                            || document.getElementById(`avatar-name-${agentName}`)?.value.trim() || '';
+            const voiceId = getVoiceId(agentName);
+            
+            const btn = document.getElementById(`save-settings-btn-${agentName}`);
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Saving...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/agents/${agentName}/save-settings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        avatar_name: avatarName,
+                        voice_id: voiceId
+                    }),
+                });
+                
+                if (response.ok) {
+                    state.avatarName = avatarName;
+                    state.voiceId = voiceId;
+                    log(`Settings saved for ${agentName}`, 'success');
+                    showToast('Settings saved!', 'success');
+                    
+                    // Sync values between Step 1 and Step 2 inputs
+                    const nameInput1 = document.getElementById(`avatar-name-${agentName}`);
+                    const nameInput2 = document.getElementById(`avatar-name-step2-${agentName}`);
+                    if (nameInput1) nameInput1.value = avatarName;
+                    if (nameInput2) nameInput2.value = avatarName;
+                } else {
+                    const data = await response.json();
+                    showToast(data.message || 'Save failed', 'error');
+                }
+            } catch (error) {
+                showToast('Save failed', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '💾 Save Settings';
+            }
+        }
+
+        // Open expression editor modal
+        function openExpressionEditor(agentName, expression) {
+            modalAgent = agentName;
+            modalExpression = expression;
+            
+            const modal = document.getElementById('expression-modal');
+            const title = document.getElementById('modal-title');
+            const preview = document.getElementById('modal-preview');
+            const promptInput = document.getElementById('modal-prompt');
+            const hint = document.getElementById('modal-hint');
+            
+            title.textContent = `Edit "${expression}" Expression`;
+            hint.textContent = `Default: "${EXPRESSION_MODIFIERS[expression] || 'with a ' + expression + ' expression'}"`;
+            promptInput.value = '';
+            
+            // Show current image if exists
+            const card = document.getElementById(`expr-card-${agentName}-${expression}`);
+            const img = card.querySelector('img');
+            if (img) {
+                preview.innerHTML = `<img src="${img.src}" alt="${expression}">`;
+            } else {
+                preview.innerHTML = `
+                    <div class="expression-card-placeholder">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/>
+                            <circle cx="9" cy="9" r="1.5"/>
+                            <path d="M21 15l-5-5L5 21"/>
+                        </svg>
+                        <div>No image yet</div>
+                    </div>
+                `;
+            }
+            
+            modal.classList.add('show');
+        }
+
+        function closeExpressionModal() {
+            document.getElementById('expression-modal').classList.remove('show');
+            modalAgent = null;
+            modalExpression = null;
+        }
+
+        // Generate single expression
+        async function generateSingleExpression() {
+            if (!modalAgent || !modalExpression) return;
+            
+            const agentName = modalAgent;
+            const expression = modalExpression;
+            const customPrompt = document.getElementById('modal-prompt').value.trim();
+            const state = agentStates[agentName];
+            
+            const btn = document.getElementById('modal-generate-btn');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Generating...';
+            
+            // Mark as generating
+            state.generatingExpressions[expression] = true;
+            const card = document.getElementById(`expr-card-${agentName}-${expression}`);
+            card.classList.add('generating');
+            const cardImage = card.querySelector('.expression-card-image');
+            cardImage.innerHTML = '<div class="spinner"></div>';
+            
+            closeExpressionModal();
+            
+            log(`Generating ${expression} for ${agentName}...`, 'info');
+            
+            try {
+                // Get background settings
+                const { backgroundType, customBackground } = getBackgroundSettings(agentName);
+                
+                const response = await fetch(`${API_BASE}/agents/${agentName}/generate-expression`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        expression,
+                        prompt: state.prompt,
+                        custom_modifier: customPrompt || null,
+                        model_id: state.model,
+                        avatar_name: state.avatarName || '',
+                        use_base_as_reference: true,  // Use saved base avatar as reference image
+                        background_type: backgroundType,
+                        custom_background: customBackground
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.image_path) {
+                    log(`${expression} generated for ${agentName}`, 'success');
+                    showToast(`${expression} expression saved!`, 'success');
+                    // Clear generating state and reload
+                    state.generatingExpressions[expression] = false;
+                    loadAvatarAgents();
+                } else {
+                    log(`Failed to generate ${expression}: ${data.message}`, 'error');
+                    showToast(data.message || 'Generation failed', 'error');
+                    state.generatingExpressions[expression] = false;
+                    loadAvatarAgents();
+                }
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+                showToast('Network error', 'error');
+                state.generatingExpressions[expression] = false;
+                loadAvatarAgents();
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '✨ Generate';
+            }
+        }
+
+        // Generate all missing expressions
+        async function generateAllExpressions(agentName) {
+            const state = agentStates[agentName];
+            const btn = document.getElementById(`gen-all-btn-${agentName}`);
+            
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Generating all...';
+            
+            log(`Generating all expressions for ${agentName}...`, 'info');
+            
+            try {
+                // Get background settings
+                const { backgroundType, customBackground } = getBackgroundSettings(agentName);
+                
+                const response = await fetch(`${API_BASE}/agents/${agentName}/generate-expressions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        base_image_url: state.baseImage || '',
+                        prompt: state.prompt,
+                        model_id: state.model,
+                        avatar_name: state.avatarName || '',
+                        use_base_as_reference: true,  // Use saved base avatar as reference image
+                        background_type: backgroundType,
+                        custom_background: customBackground
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    log(`Generated ${data.generated}/${data.generated + data.failed} expressions`, 'success');
+                    showToast(`Generated ${data.generated} expressions!`, 'success');
+                    // Clear all generating states
+                    state.generatingExpressions = {};
+                    loadAvatarAgents();
+                } else {
+                    log(`Failed: ${data.message}`, 'error');
+                    showToast(data.message || 'Generation failed', 'error');
+                }
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+                showToast('Network error', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '📦 Generate All Missing';
+                // Clear generating states on completion
+                if (state) state.generatingExpressions = {};
+            }
+        }
+
+        // Initial load
+        log('Dashboard loaded', 'info');
+        fetchAgents();
+        fetchBots();
+        fetchAgentSyncStatus();
+
+        // Refresh bots every 5 seconds
+        setInterval(fetchBots, 5000);
+    </script>
+</body>
+</html>

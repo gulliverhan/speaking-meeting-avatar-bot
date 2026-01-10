@@ -1,0 +1,16 @@
+# Expression modifiers for avatar generation
+# These describe how to modify the base avatar for each expression
+
+# Core expressions
+neutral: "with a calm, neutral expression, professional demeanor"
+happy: "with a warm, genuine smile, eyes slightly crinkled with joy"
+thinking: "with a thoughtful expression, slightly furrowed brow, looking contemplative"
+interested: "with an engaged, attentive expression, eyebrows slightly raised, showing curiosity"
+speaking: "mid-speech with mouth slightly open, animated and expressive"
+
+# Additional expressions
+curious: "with a curious expression, head slightly tilted, eyes wide with interest"
+encouraging: "with an encouraging, supportive expression, warm smile, nodding slightly"
+thoughtful: "with a deep thinking expression, chin slightly raised, eyes looking up"
+surprised: "with a mildly surprised expression, eyebrows raised, mouth slightly open"
+concerned: "with a concerned, empathetic expression, showing care and attention"

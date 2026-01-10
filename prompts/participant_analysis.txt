@@ -1,0 +1,5 @@
+This is a video frame of {participant_name} from a video call. In one brief sentence, describe what you can see. Note if:
+- Their camera appears to be OFF (black/blank screen, or just showing their name/initials)
+- It's a static profile picture rather than live video
+- Or describe their appearance, clothing, background/setting if camera is on
+Be concise and factual.

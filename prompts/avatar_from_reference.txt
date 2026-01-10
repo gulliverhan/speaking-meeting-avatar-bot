@@ -1,0 +1,4 @@
+Create a professional headshot portrait based on the reference image.
+Maintain the same person's identity, features, and likeness.
+{prompt}
+High quality, professional lighting, clean background.

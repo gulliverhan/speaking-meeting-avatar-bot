@@ -1,0 +1,8 @@
+Create a professional headshot of {person_desc}, {modifier}
+
+CRITICAL: The person must look EXACTLY like in the reference image. Same face, same features, same style.
+Only change the facial expression to: {expression}
+
+{background_instruction}
+
+Style: Professional studio lighting, sharp focus on face.

@@ -1,0 +1,5 @@
+Professional headshot portrait of {base_prompt}, {modifier}
+
+{background_instruction}
+
+High quality, professional studio lighting.

@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ElevenLabs Meeting Agent</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #1a1a2e;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        
+        .avatar-container {
+            position: relative;
+            width: 90vmin;
+            height: 90vmin;
+            max-width: 800px;
+            max-height: 800px;
+        }
+        
+        .avatar {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 6px solid #4a90d9;
+            box-shadow: 0 0 60px rgba(74, 144, 217, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .avatar.speaking {
+            border-color: #00d9a5;
+            box-shadow: 0 0 80px rgba(0, 217, 165, 0.5);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        
+        .avatar.listening {
+            border-color: #ffd93d;
+            box-shadow: 0 0 60px rgba(255, 217, 61, 0.4);
+        }
+        
+        .hand-raised {
+            position: absolute;
+            top: 5%;
+            right: 5%;
+            font-size: 4rem;
+            animation: wave 1s ease-in-out infinite;
+            display: none;
+        }
+        
+        .hand-raised.visible {
+            display: block;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+        
+        @keyframes wave {
+            0%, 100% { transform: rotate(0deg); }
+            25% { transform: rotate(20deg); }
+            75% { transform: rotate(-20deg); }
+        }
+        
+        /* Small status indicator in corner - only shown when not connected */
+        .status-indicator {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 14px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #888;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .status-indicator.visible {
+            opacity: 1;
+        }
+        
+        .status-indicator.error {
+            background: rgba(255, 82, 82, 0.2);
+            color: #ff5252;
+        }
+        
+        .status-indicator.connecting {
+            background: rgba(255, 217, 61, 0.2);
+            color: #ffd93d;
+        }
+    </style>
+</head>
+<body>
+    <div class="avatar-container">
+        <img src="/static/avatar-neutral.png" alt="Bot Avatar" class="avatar" id="avatar">
+        <div class="hand-raised" id="hand-raised">✋</div>
+    </div>
+    
+    <div class="status-indicator" id="status">Connecting...</div>
+
+    <!-- ElevenLabs JavaScript SDK -->
+    <script type="module">
+        // Import ElevenLabs SDK from CDN
+        import { Conversation } from 'https://cdn.jsdelivr.net/npm/@11labs/client@latest/+esm';
+        
+        // Configuration from URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        const agentId = urlParams.get('agent_id') || '';
+        const clientId = urlParams.get('client_id') || '';
+        const botName = urlParams.get('bot_name') || 'Meeting Agent';
+        const agentName = urlParams.get('agent_name') || '';  // e.g., 'meeting_facilitator'
+        
+        // DOM elements
+        const avatar = document.getElementById('avatar');
+        const handRaised = document.getElementById('hand-raised');
+        const statusEl = document.getElementById('status');
+        
+        // Expression images - loaded dynamically based on agent config
+        let expressions = ['neutral', 'speaking'];  // Fallback
+        const preloadedImages = {};
+        
+        function preloadImages() {
+            expressions.forEach(expr => {
+                const img = new Image();
+                if (agentName) {
+                    img.src = `/agents/${agentName}/expressions/${expr}.png`;
+                } else {
+                    img.src = `/static/avatar-${expr}.png`;
+                }
+                preloadedImages[expr] = img;
+                log(`Preloading: ${expr}`);
+            });
+        }
+        
+        // Fetch expressions list for this agent and preload them
+        async function loadExpressions() {
+            if (agentName) {
+                try {
+                    const response = await fetch(`/agents/${agentName}/expressions-list`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        expressions = data.expressions || expressions;
+                        log(`Loaded ${expressions.length} expressions: ${expressions.join(', ')}`);
+                    }
+                } catch (e) {
+                    log(`Failed to load expressions: ${e.message}`, 'error');
+                }
+            }
+            preloadImages();
+        }
+        
+        // Set initial avatar image based on agent_name
+        if (agentName) {
+            avatar.src = `/agents/${agentName}/expressions/neutral.png`;
+        }
+        
+        // Load expressions and preload images
+        loadExpressions();
+        
+        // State
+        let conversation = null;
+        let serverWs = null;
+        let isConnected = false;
+        let isSpeaking = false;
+        
+        // Logging (console only in production mode)
+        function log(message, level = 'info') {
+            const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+            console.log(`[${timestamp}] [${level.toUpperCase()}]`, message);
+        }
+        
+        function showStatus(message, type = '') {
+            statusEl.textContent = message;
+            statusEl.className = 'status-indicator visible ' + type;
+            log(`Status: ${message}`, type === 'error' ? 'error' : 'info');
+            
+            // Hide status after connection is established
+            if (type === '' && message.includes('Connected')) {
+                setTimeout(() => {
+                    statusEl.classList.remove('visible');
+                }, 2000);
+            }
+        }
+        
+        // Track current expression (for restoring after speaking)
+        let currentExpression = 'neutral';
+        let pendingExpression = 'interested'; // Expression to show after speaking ends
+        
+        function setExpression(expression, isAutomatic = false) {
+            // If the LLM sets an expression while we're speaking, remember it for later
+            // but don't change the visual - keep showing "speaking"
+            if (!isAutomatic && expression !== 'speaking' && isSpeaking) {
+                pendingExpression = expression;
+                log(`Expression queued (speaking): ${expression} - will show after speaking`);
+                return; // Don't change visual while speaking
+            }
+            
+            // Track non-speaking expressions so we can restore them
+            if (expression !== 'speaking' && !isAutomatic) {
+                pendingExpression = expression;
+            }
+            
+            // Use preloaded image if available (instant switch)
+            if (preloadedImages[expression] && preloadedImages[expression].complete) {
+                avatar.src = preloadedImages[expression].src;
+            } else if (agentName) {
+                // Fallback to loading directly
+                avatar.src = `/agents/${agentName}/expressions/${expression}.png`;
+            } else {
+                // Fallback to static paths (legacy)
+                const fallbackPaths = {
+                    'neutral': '/static/avatar-neutral.png',
+                    'happy': '/static/avatar-happy.png',
+                    'thinking': '/static/avatar-thinking.png',
+                    'speaking': '/static/avatar-speaking.png',
+                    'interested': '/static/avatar-neutral.png'
+                };
+                avatar.src = fallbackPaths[expression] || fallbackPaths['neutral'];
+            }
+            
+            currentExpression = expression;
+            log(`Expression: ${expression}${isAutomatic ? ' (auto)' : ''}${preloadedImages[expression]?.complete ? ' (preloaded)' : ''}`);
+        }
+        
+        function setHandRaised(raised) {
+            handRaised.classList.toggle('visible', raised);
+        }
+        
+        function setSpeaking(speaking) {
+            isSpeaking = speaking;
+            avatar.classList.toggle('speaking', speaking);
+            avatar.classList.toggle('listening', !speaking && isConnected);
+            
+            // Automatically change expression based on speaking state
+            if (speaking) {
+                // Agent started speaking - switch to speaking expression
+                setExpression('speaking', true);
+            } else {
+                // Agent stopped speaking - restore the pending expression
+                setExpression(pendingExpression || 'interested', true);
+            }
+        }
+        
+        // Connect to our server for context updates (Recall.ai transcription)
+        async function connectToServer() {
+            if (!clientId) {
+                log('No client_id - server context updates disabled', 'warn');
+                return false;
+            }
+            
+            try {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const serverWsUrl = `${protocol}//${window.location.host}/ws/browser/${clientId}`;
+                
+                log(`Connecting to server: ${serverWsUrl}`);
+                serverWs = new WebSocket(serverWsUrl);
+                
+                serverWs.onopen = () => {
+                    log('Server WebSocket connected');
+                };
+                
+                serverWs.onmessage = async (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        if (data.type === 'start_conversation') {
+                            // Server says bot is in the call - wait a moment for video to establish
+                            log('Received start signal from server - bot is in call');
+                            showStatus('Starting...', 'connecting');
+                            
+                            // Give Recall.ai time to establish video stream before agent speaks
+                            // This prevents the agent from speaking before the video is visible
+                            await new Promise(resolve => setTimeout(resolve, 3000));
+                            
+                            showStatus('Connecting to AI...', 'connecting');
+                            await startElevenLabsConversation();
+                        } else if (data.type === 'context_update' && conversation) {
+                            log(`Context from ${data.speaker}: ${data.context.substring(0, 50)}...`);
+                            await conversation.sendContextualUpdate(data.context);
+                        } else if (data.type === 'user_message' && conversation) {
+                            // Send as user input - agent will respond to this
+                            log(`User message prompt: ${data.message.substring(0, 50)}...`);
+                            // Try different SDK methods - one should work
+                            try {
+                                if (conversation.sendUserMessage) {
+                                    await conversation.sendUserMessage(data.message);
+                                } else if (conversation.sendUserInput) {
+                                    await conversation.sendUserInput(data.message);
+                                } else {
+                                    // Fallback to contextual update with instruction to respond
+                                    await conversation.sendContextualUpdate(`[RESPOND TO THIS] ${data.message}`);
+                                }
+                            } catch (e) {
+                                log(`SDK method error, using contextual: ${e.message}`, 'warning');
+                                await conversation.sendContextualUpdate(`[RESPOND TO THIS] ${data.message}`);
+                            }
+                        } else if (data.type === 'expression_change') {
+                            // Handle expression change from webhook
+                            log(`Expression change from server: ${data.expression}`);
+                            setExpression(data.expression);
+                        }
+                    } catch (e) {
+                        log(`Error handling server message: ${e.message}`, 'error');
+                    }
+                };
+                
+                serverWs.onerror = (error) => {
+                    log(`Server WebSocket error: ${error}`, 'error');
+                };
+                
+                serverWs.onclose = () => {
+                    log('Server WebSocket closed');
+                };
+                
+                return true;
+            } catch (e) {
+                log(`Failed to connect to server: ${e.message}`, 'error');
+                return false;
+            }
+        }
+        
+        // Start ElevenLabs conversation
+        async function startElevenLabsConversation() {
+            if (conversation) {
+                log('Conversation already started');
+                return;
+            }
+            
+            try {
+                // Request microphone access
+                log('Requesting microphone access...');
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                log(`Microphone granted - tracks: ${stream.getAudioTracks().length}`);
+                
+                // Start ElevenLabs conversation
+                log('Starting ElevenLabs conversation...');
+                
+                conversation = await Conversation.startSession({
+                    agentId: agentId,
+                    
+                    onModeChange: (mode) => {
+                        log(`Mode: ${mode.mode}`);
+                        if (mode.mode === 'speaking') {
+                            setSpeaking(true);
+                        } else if (mode.mode === 'listening') {
+                            setSpeaking(false);
+                        }
+                    },
+                    
+                    onStatusChange: (status) => {
+                        log(`SDK Status: ${JSON.stringify(status)}`);
+                        if (status.status === 'connected') {
+                            isConnected = true;
+                            showStatus('Connected');
+                            avatar.classList.add('listening');
+                        } else if (status.status === 'disconnected') {
+                            isConnected = false;
+                            showStatus('Disconnected', 'error');
+                            avatar.classList.remove('speaking', 'listening');
+                        }
+                    },
+                    
+                    onMessage: (message) => {
+                        log(`Message: ${JSON.stringify(message).substring(0, 100)}`);
+                    },
+                    
+                    onError: (error) => {
+                        log(`SDK Error: ${error}`, 'error');
+                        showStatus('Connection error', 'error');
+                    }
+                });
+                
+                log('ElevenLabs conversation started!');
+            } catch (error) {
+                log(`Failed to start conversation: ${error.message}`, 'error');
+                showStatus(`Error: ${error.message}`, 'error');
+            }
+        }
+        
+        // Main initialization
+        async function init() {
+            log('Initializing...');
+            log(`Agent ID: ${agentId}`);
+            log(`Client ID: ${clientId}`);
+            log(`Agent Name: ${agentName}`);
+            
+            if (!agentId) {
+                showStatus('Error: No agent_id provided', 'error');
+                return;
+            }
+            
+            showStatus('Waiting to join call...', 'connecting');
+            
+            // Connect to server first - it will tell us when to start the conversation
+            await connectToServer();
+        }
+        
+        // Auto-start when page loads
+        init();
+        
+        // Handle page unload
+        window.addEventListener('beforeunload', () => {
+            if (conversation) {
+                conversation.endSession();
+            }
+            if (serverWs) {
+                serverWs.close();
+            }
+        });
+    </script>
+</body>
+</html>

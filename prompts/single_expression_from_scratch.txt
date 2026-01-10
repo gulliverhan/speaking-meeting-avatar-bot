@@ -1,0 +1,6 @@
+Professional headshot portrait photo of {person_desc}, {modifier}
+
+{background_instruction}
+
+Style: Professional studio lighting, sharp focus on face.
+MUST be the same person/character. Only the facial expression should change.

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            text-align: center;
+        }
+        
+        .container {
+            padding: 2rem;
+        }
+        
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+        
+        .status {
+            font-size: 1.5rem;
+            padding: 1rem 2rem;
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            margin: 1rem 0;
+        }
+        
+        .status.playing {
+            background: rgba(0, 217, 165, 0.3);
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+        
+        .debug {
+            margin-top: 2rem;
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: #888;
+            max-width: 500px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        button {
+            padding: 1rem 2rem;
+            font-size: 1.2rem;
+            background: #4a90d9;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            margin: 0.5rem;
+        }
+        
+        button:hover {
+            background: #357abd;
+        }
+        
+        .note-display {
+            font-size: 3rem;
+            margin: 1rem 0;
+            min-height: 4rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔊 Audio Test Page</h1>
+        <div class="status" id="status">Ready to play audio</div>
+        <div class="note-display" id="note-display"></div>
+        
+        <div>
+            <button onclick="playLongTone()">Play Long Tone (30s)</button>
+            <button onclick="playMelody()">Play Melody</button>
+            <button onclick="stopAudio()">Stop</button>
+        </div>
+        
+        <div class="debug" id="debug"></div>
+    </div>
+    
+    <script>
+        const statusEl = document.getElementById('status');
+        const debugEl = document.getElementById('debug');
+        const noteDisplay = document.getElementById('note-display');
+        
+        let audioContext = null;
+        let currentOscillator = null;
+        let currentGain = null;
+        let melodyTimeout = null;
+        
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            debugEl.innerHTML = `[${time}] ${msg}<br>` + debugEl.innerHTML;
+            console.log(msg);
+        }
+        
+        function setStatus(text, playing = false) {
+            statusEl.textContent = text;
+            statusEl.className = 'status' + (playing ? ' playing' : '');
+        }
+        
+        function initAudio() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                log(`AudioContext created: ${audioContext.sampleRate}Hz`);
+            }
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+                log('AudioContext resumed');
+            }
+            return audioContext;
+        }
+        
+        // Play a long sustained tone
+        function playLongTone() {
+            try {
+                stopAudio();
+                const ctx = initAudio();
+                
+                currentOscillator = ctx.createOscillator();
+                currentOscillator.type = 'sine';
+                currentOscillator.frequency.setValueAtTime(440, ctx.currentTime);
+                
+                currentGain = ctx.createGain();
+                currentGain.gain.setValueAtTime(0.4, ctx.currentTime);
+                
+                currentOscillator.connect(currentGain);
+                currentGain.connect(ctx.destination);
+                
+                currentOscillator.start();
+                log('Playing 440Hz tone for 30 seconds');
+                setStatus('🎵 Playing 440Hz tone (30s)...', true);
+                noteDisplay.textContent = '♪ A4 (440Hz)';
+                
+                // Change frequency every 10 seconds to make it obvious
+                setTimeout(() => {
+                    if (currentOscillator) {
+                        currentOscillator.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+                        log('Changed to 523Hz (C5)');
+                        noteDisplay.textContent = '♪ C5 (523Hz)';
+                    }
+                }, 10000);
+                
+                setTimeout(() => {
+                    if (currentOscillator) {
+                        currentOscillator.frequency.setValueAtTime(659.25, ctx.currentTime); // E5
+                        log('Changed to 659Hz (E5)');
+                        noteDisplay.textContent = '♪ E5 (659Hz)';
+                    }
+                }, 20000);
+                
+                // Stop after 30 seconds
+                setTimeout(() => {
+                    stopAudio();
+                    log('Long tone complete');
+                }, 30000);
+                
+            } catch (e) {
+                log(`Error: ${e.message}`);
+                setStatus('Error: ' + e.message);
+            }
+        }
+        
+        // Play a simple melody
+        function playMelody() {
+            try {
+                stopAudio();
+                const ctx = initAudio();
+                
+                // Simple melody: Twinkle Twinkle Little Star
+                const notes = [
+                    { freq: 262, dur: 500, name: 'C4' },  // Twin-
+                    { freq: 262, dur: 500, name: 'C4' },  // kle
+                    { freq: 392, dur: 500, name: 'G4' },  // twin-
+                    { freq: 392, dur: 500, name: 'G4' },  // kle
+                    { freq: 440, dur: 500, name: 'A4' },  // lit-
+                    { freq: 440, dur: 500, name: 'A4' },  // tle
+                    { freq: 392, dur: 1000, name: 'G4' }, // star
+                    { freq: 0, dur: 300, name: '...' },   // pause
+                    { freq: 349, dur: 500, name: 'F4' },  // how
+                    { freq: 349, dur: 500, name: 'F4' },  // I
+                    { freq: 330, dur: 500, name: 'E4' },  // won-
+                    { freq: 330, dur: 500, name: 'E4' },  // der
+                    { freq: 294, dur: 500, name: 'D4' },  // what
+                    { freq: 294, dur: 500, name: 'D4' },  // you
+                    { freq: 262, dur: 1000, name: 'C4' }, // are
+                ];
+                
+                log('Playing melody: Twinkle Twinkle Little Star');
+                setStatus('🎵 Playing melody...', true);
+                
+                let noteIndex = 0;
+                
+                function playNote() {
+                    if (noteIndex >= notes.length) {
+                        // Loop the melody
+                        noteIndex = 0;
+                        log('Melody loop restart');
+                    }
+                    
+                    const note = notes[noteIndex];
+                    noteDisplay.textContent = `♪ ${note.name}`;
+                    
+                    if (note.freq > 0) {
+                        // Stop previous oscillator
+                        if (currentOscillator) {
+                            currentOscillator.stop();
+                        }
+                        
+                        currentOscillator = ctx.createOscillator();
+                        currentOscillator.type = 'sine';
+                        currentOscillator.frequency.setValueAtTime(note.freq, ctx.currentTime);
+                        
+                        currentGain = ctx.createGain();
+                        currentGain.gain.setValueAtTime(0.3, ctx.currentTime);
+                        // Envelope for nicer sound
+                        currentGain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + note.dur / 1000 - 0.05);
+                        
+                        currentOscillator.connect(currentGain);
+                        currentGain.connect(ctx.destination);
+                        currentOscillator.start();
+                        currentOscillator.stop(ctx.currentTime + note.dur / 1000);
+                    }
+                    
+                    noteIndex++;
+                    melodyTimeout = setTimeout(playNote, note.dur);
+                }
+                
+                playNote();
+                
+            } catch (e) {
+                log(`Error: ${e.message}`);
+                setStatus('Error: ' + e.message);
+            }
+        }
+        
+        function stopAudio() {
+            if (currentOscillator) {
+                try {
+                    currentOscillator.stop();
+                } catch (e) {}
+                currentOscillator = null;
+            }
+            if (melodyTimeout) {
+                clearTimeout(melodyTimeout);
+                melodyTimeout = null;
+            }
+            noteDisplay.textContent = '';
+            setStatus('Stopped');
+            log('Audio stopped');
+        }
+        
+        // Auto-play on load
+        window.addEventListener('load', () => {
+            log('Page loaded');
+            log(`User Agent: ${navigator.userAgent.substring(0, 60)}...`);
+            log(`AudioContext: ${typeof AudioContext !== 'undefined' ? 'available' : 'NOT available'}`);
+            
+            // Auto-start melody after 2 seconds
+            setTimeout(() => {
+                log('Auto-starting melody...');
+                playMelody();
+            }, 2000);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+Create a professional headshot based on the reference image, {modifier}
+This must be the SAME PERSON as in the reference - maintain identical:
+- Face shape and features
+- Hair color and style  
+- Skin tone
+- Clothing
+Only change the facial expression.
+
+{background_instruction}
+
+Professional studio lighting.
