@@ -101,12 +101,33 @@
             background: rgba(255, 217, 61, 0.2);
             color: #ffd93d;
         }
+        
+        /* Expression indicator at bottom of avatar circle */
+        .expression-indicator {
+            position: absolute;
+            bottom: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 1rem;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #fff;
+            background: linear-gradient(135deg, #4a90d9 0%, #357abd 100%);
+            padding: 8px 20px;
+            border-radius: 20px;
+            z-index: 100;
+            box-shadow: 0 4px 12px rgba(74, 144, 217, 0.4);
+            transition: all 0.3s ease;
+        }
     </style>
 </head>
 <body>
     <div class="avatar-container">
         <img src="/static/avatar-neutral.png" alt="Bot Avatar" class="avatar" id="avatar">
         <div class="hand-raised" id="hand-raised">✋</div>
+        <div class="expression-indicator" id="expression-indicator">neutral</div>
     </div>
     
     <div class="status-indicator" id="status">Connecting...</div>
@@ -127,6 +148,25 @@
         const avatar = document.getElementById('avatar');
         const handRaised = document.getElementById('hand-raised');
         const statusEl = document.getElementById('status');
+        const expressionIndicator = document.getElementById('expression-indicator');
+        
+        // Emoji mapping for expressions
+        const expressionEmojis = {
+            'neutral': '😐',
+            'happy': '😊',
+            'thinking': '🤔',
+            'interested': '🧐',
+            'curious': '🤨',
+            'encouraging': '👍',
+            'thoughtful': '💭',
+            'playful': '😏',
+            'angry': '😤',
+            'doubtful': '🤷',
+            'laughing': '😂',
+            'sad': '😢',
+            'surprised': '😮',
+            'concerned': '😟'
+        };
         
         // Expression images - loaded dynamically based on agent config
         let expressions = ['neutral'];  // Fallback
@@ -203,6 +243,30 @@
         let serverWs = null;
         let isConnected = false;
         let isSpeaking = false;
+        
+        // Instrumentation state
+        let conversationId = null;
+        let lastModeChangeTime = null;
+        let userSpeechStartTime = null;
+        let botSpeechStartTime = null;
+        
+        // Send metric event to server
+        function sendMetricEvent(eventType, data = {}) {
+            if (!serverWs || serverWs.readyState !== WebSocket.OPEN) {
+                log(`Cannot send metric (no server connection): ${eventType}`, 'warn');
+                return;
+            }
+            const event = {
+                type: 'metric_event',
+                event_type: eventType,
+                timestamp: Date.now() / 1000,  // Unix timestamp in seconds
+                conversation_id: conversationId,
+                client_id: clientId,
+                ...data
+            };
+            serverWs.send(JSON.stringify(event));
+            log(`📊 Metric: ${eventType}`);
+        }
         
         // Logging (console only in production mode)
         function log(message, level = 'info') {
@@ -304,6 +368,10 @@
             }
             
             currentExpression = expression;
+            
+            // Update the expression indicator with the expression name
+            expressionIndicator.textContent = expression;
+            
             log(`Expression: ${expression}${isAutomatic ? ' (auto)' : ''} (${assetType})${usedFallback ? ' (fallback)' : ''}`);
         }
         
@@ -345,13 +413,12 @@
                         const data = JSON.parse(event.data);
                         
                         if (data.type === 'start_conversation') {
-                            // Server says bot is in the call - wait a moment for video to establish
+                            // Server says bot is in the call
                             log('Received start signal from server - bot is in call');
                             showStatus('Starting...', 'connecting');
                             
-                            // Give Recall.ai time to establish video stream before agent speaks
-                            // This prevents the agent from speaking before the video is visible
-                            await new Promise(resolve => setTimeout(resolve, 3000));
+                            // Brief delay to ensure page is fully rendered in Recall.ai
+                            await new Promise(resolve => setTimeout(resolve, 1000));
                             
                             showStatus('Connecting to AI...', 'connecting');
                             await startElevenLabsConversation();
@@ -416,16 +483,39 @@
                 // Start ElevenLabs conversation
                 log('Starting ElevenLabs conversation...');
                 
+                // Generate conversation ID for this session
+                conversationId = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                
                 conversation = await Conversation.startSession({
                     agentId: agentId,
                     
                     onModeChange: (mode) => {
                         log(`Mode: ${mode.mode}`);
+                        const now = Date.now() / 1000;
+                        
                         if (mode.mode === 'speaking') {
+                            // Bot started speaking - track turn-around time
+                            botSpeechStartTime = now;
+                            sendMetricEvent('bot_speech_start', {
+                                user_speech_end_time: lastModeChangeTime,
+                                turn_around_time: lastModeChangeTime ? (now - lastModeChangeTime) * 1000 : null
+                            });
                             setSpeaking(true);
                         } else if (mode.mode === 'listening') {
+                            // Bot stopped speaking - ready to listen
+                            // NOTE: "listening" mode does NOT mean user is speaking!
+                            // We only track user speech when we get actual transcription.
+                            if (isSpeaking && botSpeechStartTime) {
+                                // Bot just finished speaking
+                                sendMetricEvent('bot_speech_end', {
+                                    duration: (now - botSpeechStartTime) * 1000
+                                });
+                            }
+                            // Reset user speech tracking - will be set when we get transcription
+                            userSpeechStartTime = null;
                             setSpeaking(false);
                         }
+                        lastModeChangeTime = now;
                     },
                     
                     onStatusChange: (status) => {
@@ -434,20 +524,52 @@
                             isConnected = true;
                             showStatus('Connected');
                             avatar.classList.add('listening');
+                            sendMetricEvent('conversation_start', { backend: 'elevenlabs_browser_sdk' });
                         } else if (status.status === 'disconnected') {
                             isConnected = false;
                             showStatus('Disconnected', 'error');
                             avatar.classList.remove('speaking', 'listening');
+                            sendMetricEvent('conversation_end');
                         }
                     },
                     
                     onMessage: (message) => {
                         log(`Message: ${JSON.stringify(message).substring(0, 100)}`);
+                        // Track transcription events - this is our evidence user is actually speaking
+                        if (message.type === 'user_transcript' || message.source === 'user') {
+                            const now = Date.now() / 1000;
+                            
+                            // First transcription = user started speaking
+                            if (!userSpeechStartTime) {
+                                userSpeechStartTime = now;
+                                sendMetricEvent('user_speech_start');
+                            }
+                            
+                            sendMetricEvent('transcription_received', {
+                                transcript: message.message || message.text,
+                                is_final: message.isFinal !== false
+                            });
+                            
+                            // Final transcript = user finished speaking
+                            if (message.isFinal !== false) {
+                                sendMetricEvent('user_speech_end', {
+                                    duration: (now - userSpeechStartTime) * 1000
+                                });
+                                userSpeechStartTime = null;  // Reset for next utterance
+                            }
+                        } else if (message.type === 'agent_response' || message.source === 'ai') {
+                            sendMetricEvent('agent_response', {
+                                text: message.message || message.text
+                            });
+                        } else if (message.type === 'interruption') {
+                            sendMetricEvent('interruption');
+                        }
                     },
                     
                     onError: (error) => {
                         log(`SDK Error: ${error}`, 'error');
                         showStatus('Connection error', 'error');
+                        sendMetricEvent('error', { error: String(error) });
                     }
                 });
                 

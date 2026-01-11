@@ -64,3 +64,4 @@ agents/meeting_facilitator
 examples
 .elevenlabs_agents.json
 .python-version
+data/metrics.db
