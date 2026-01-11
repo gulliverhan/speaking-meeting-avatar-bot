@@ -130,18 +130,31 @@
         
         // Expression images - loaded dynamically based on agent config
         let expressions = ['neutral', 'speaking'];  // Fallback
+        let expressionAnimations = {};  // Track which expressions have GIF animations
         const preloadedImages = {};
+        const preloadedGifs = {};
         
         function preloadImages() {
             expressions.forEach(expr => {
+                // Preload PNG
                 const img = new Image();
+                img.onload = () => log(`Loaded PNG: ${expr}`);
+                img.onerror = () => log(`Missing PNG: ${expr} (will use neutral)`, 'warn');
                 if (agentName) {
                     img.src = `/agents/${agentName}/expressions/${expr}.png`;
                 } else {
                     img.src = `/static/avatar-${expr}.png`;
                 }
                 preloadedImages[expr] = img;
-                log(`Preloading: ${expr}`);
+                
+                // Preload GIF if it exists
+                if (expressionAnimations[expr]) {
+                    const gif = new Image();
+                    gif.onload = () => log(`Loaded GIF: ${expr}`);
+                    gif.onerror = () => log(`Missing GIF: ${expr}`, 'warn');
+                    gif.src = `/agents/${agentName}/expressions/${expr}.gif`;
+                    preloadedGifs[expr] = gif;
+                }
             });
         }
         
@@ -153,7 +166,9 @@
                     if (response.ok) {
                         const data = await response.json();
                         expressions = data.expressions || expressions;
-                        log(`Loaded ${expressions.length} expressions: ${expressions.join(', ')}`);
+                        expressionAnimations = data.animations || {};
+                        const animatedCount = Object.values(expressionAnimations).filter(v => v).length;
+                        log(`Loaded ${expressions.length} expressions (${animatedCount} animated): ${expressions.join(', ')}`);
                     }
                 } catch (e) {
                     log(`Failed to load expressions: ${e.message}`, 'error');
@@ -213,11 +228,35 @@
                 pendingExpression = expression;
             }
             
-            // Use preloaded image if available (instant switch)
-            if (preloadedImages[expression] && preloadedImages[expression].complete) {
+            // Check if this expression has an animated GIF
+            const hasAnimation = expressionAnimations[expression];
+            let usedGif = false;
+            let usedFallback = false;
+            
+            // Check if we have the image preloaded (means it exists)
+            const hasImage = preloadedImages[expression] && preloadedImages[expression].complete && preloadedImages[expression].naturalWidth > 0;
+            const hasGif = preloadedGifs[expression] && preloadedGifs[expression].complete && preloadedGifs[expression].naturalWidth > 0;
+            
+            // If we don't have this expression, fall back to neutral
+            if (!hasImage && !hasGif && expression !== 'neutral') {
+                log(`Expression "${expression}" not found, falling back to neutral`);
+                expression = 'neutral';
+                usedFallback = true;
+            }
+            
+            // Prefer GIF if available and preloaded
+            if (hasAnimation && hasGif) {
+                avatar.src = preloadedGifs[expression].src;
+                usedGif = true;
+            } else if (hasAnimation && agentName && !usedFallback) {
+                // Try loading GIF directly (only if not already falling back)
+                avatar.src = `/agents/${agentName}/expressions/${expression}.gif`;
+                usedGif = true;
+            } else if (hasImage) {
+                // Fall back to preloaded PNG
                 avatar.src = preloadedImages[expression].src;
             } else if (agentName) {
-                // Fallback to loading directly
+                // Fallback to loading PNG directly
                 avatar.src = `/agents/${agentName}/expressions/${expression}.png`;
             } else {
                 // Fallback to static paths (legacy)
@@ -232,7 +271,7 @@
             }
             
             currentExpression = expression;
-            log(`Expression: ${expression}${isAutomatic ? ' (auto)' : ''}${preloadedImages[expression]?.complete ? ' (preloaded)' : ''}`);
+            log(`Expression: ${expression}${isAutomatic ? ' (auto)' : ''} ${usedGif ? '(GIF)' : '(PNG)'}${usedFallback ? ' (fallback)' : ''}`);
         }
         
         function setHandRaised(raised) {

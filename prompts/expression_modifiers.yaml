@@ -14,3 +14,8 @@ encouraging: "with an encouraging, supportive expression, warm smile, nodding sl
 thoughtful: "with a deep thinking expression, chin slightly raised, eyes looking up"
 surprised: "with a mildly surprised expression, eyebrows raised, mouth slightly open"
 concerned: "with a concerned, empathetic expression, showing care and attention"
+playful: "with a playful, mischievous expression, slight smirk, eyes twinkling with amusement"
+angry: "with a frustrated or annoyed expression, furrowed brow, tight lips, intense gaze"
+doubtful: "with a skeptical, doubtful expression, one eyebrow raised, slight frown, questioning look"
+laughing: "mid-laugh with mouth open, genuine smile, eyes crinkled, joyful and amused"
+sad: "with a sad, sorrowful expression, downturned mouth, slightly furrowed brow, sympathetic eyes"

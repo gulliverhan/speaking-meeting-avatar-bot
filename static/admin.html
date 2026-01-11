@@ -861,6 +861,91 @@
             height: 100%;
             object-fit: cover;
         }
+
+        /* Animation Styles */
+        .expression-animation {
+            margin-top: 0.5rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .expression-animation img {
+            width: 100%;
+            display: block;
+        }
+
+        .expression-animation-controls {
+            position: absolute;
+            top: 0.25rem;
+            right: 0.25rem;
+            display: flex;
+            gap: 0.25rem;
+        }
+
+        .expression-animation-controls button {
+            padding: 0.25rem 0.5rem;
+            background: rgba(0, 0, 0, 0.7);
+            border: none;
+            border-radius: 4px;
+            color: white;
+            font-size: 0.6875rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .expression-animation-controls button:hover {
+            background: var(--error);
+        }
+
+        .expression-card-actions {
+            display: flex;
+            gap: 0.25rem;
+            padding: 0.375rem;
+            border-top: 1px solid var(--border);
+        }
+
+        .expression-card-actions button {
+            flex: 1;
+            padding: 0.375rem;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 0.6875rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .expression-card-actions button:hover:not(:disabled) {
+            background: var(--accent-glow);
+            border-color: var(--accent);
+            color: var(--accent-hover);
+        }
+
+        .expression-card-actions button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .expression-card-actions button.generating {
+            background: var(--accent-glow);
+            animation: pulse 1s infinite;
+        }
+
+        .animation-badge {
+            position: absolute;
+            top: 0.375rem;
+            left: 0.375rem;
+            padding: 0.125rem 0.375rem;
+            background: rgba(99, 102, 241, 0.9);
+            border-radius: 4px;
+            font-size: 0.625rem;
+            color: white;
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>
@@ -1043,6 +1128,42 @@
                 <button class="btn btn-secondary" onclick="closeExpressionModal()">Cancel</button>
                 <button class="btn btn-primary" onclick="generateSingleExpression()" id="modal-generate-btn">
                     ✨ Generate
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Animation Generator Modal -->
+    <div class="modal-overlay" id="animation-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title" id="animation-modal-title">Generate Animation</h3>
+                <button class="modal-close" onclick="closeAnimationModal()">&times;</button>
+            </div>
+            <div class="modal-preview" id="animation-modal-preview">
+                <div class="expression-card-placeholder">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/>
+                        <circle cx="9" cy="9" r="1.5"/>
+                        <path d="M21 15l-5-5L5 21"/>
+                    </svg>
+                    <div>Source image</div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Animation Prompt</label>
+                <textarea id="animation-prompt" placeholder="Describe the motion you want...">the person is talking</textarea>
+                <p class="form-hint">Describe what the person should be doing. Common prompts: "the person is talking", "the person is nodding and smiling", "the person is listening attentively"</p>
+            </div>
+            <div class="form-group">
+                <label>Duration (seconds)</label>
+                <input type="number" id="animation-duration" value="2" min="1" max="10" step="1" style="width: 100px;">
+                <p class="form-hint">Length of the animation (1-10 seconds)</p>
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-secondary" onclick="closeAnimationModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="generateAnimation()" id="animation-generate-btn">
+                    🎬 Generate Animation
                 </button>
             </div>
         </div>
@@ -1707,12 +1828,19 @@
                                 voiceId: agent.voice_id || '',
                                 avatarName: agent.avatar_name || '',  // Load saved avatar name
                                 generatingExpressions: {},
+                                generatingAnimations: {},  // Track animation generation state
                                 backgroundType: 'none',  // Persist background settings
                                 customBackground: ''
                             };
-                        } else if (agent.base_image_url && !agentStates[agent.name].baseImage) {
+                        } else {
+                            // Ensure generatingAnimations exists
+                            if (!agentStates[agent.name].generatingAnimations) {
+                                agentStates[agent.name].generatingAnimations = {};
+                            }
                             // If state exists but doesn't have baseImage, load it from server
-                            agentStates[agent.name].baseImage = agent.base_image_url;
+                            if (agent.base_image_url && !agentStates[agent.name].baseImage) {
+                                agentStates[agent.name].baseImage = agent.base_image_url;
+                            }
                         }
                     });
                     renderAvatarAgents(agents);
@@ -1902,12 +2030,14 @@
                         <div class="expression-grid-editor">
                             ${expressions.map(expr => {
                                 const hasImage = agent.expression_images?.[expr];
+                                const hasAnimation = agent.expression_animations?.[expr];
                                 const isGenerating = state.generatingExpressions?.[expr];
+                                const isAnimating = state.generatingAnimations?.[expr];
                                 return `
                                 <div class="expression-card ${hasImage ? 'has-image' : ''} ${isGenerating ? 'generating' : ''}" 
-                                     onclick="openExpressionEditor('${agent.name}', '${expr}')"
                                      id="expr-card-${agent.name}-${expr}">
-                                    <div class="expression-card-image">
+                                    <div class="expression-card-image" onclick="openExpressionEditor('${agent.name}', '${expr}')" style="cursor: pointer;">
+                                        ${hasAnimation ? '<span class="animation-badge">🎬 Animated</span>' : ''}
                                         ${isGenerating ? `
                                             <div class="spinner"></div>
                                         ` : hasImage ? `
@@ -1925,6 +2055,24 @@
                                         <span class="expression-card-name">${expr}</span>
                                         <span class="expression-card-status">${hasImage ? '✓' : 'Empty'}</span>
                                     </div>
+                                    ${hasImage ? `
+                                        <div class="expression-card-actions">
+                                            <button onclick="event.stopPropagation(); openAnimationModal('${agent.name}', '${expr}')" 
+                                                    ${isAnimating ? 'disabled class="generating"' : ''}>
+                                                ${isAnimating ? '⏳ Animating...' : (hasAnimation ? '🔄 Re-animate' : '🎬 Animate')}
+                                            </button>
+                                        </div>
+                                    ` : ''}
+                                    ${hasAnimation ? `
+                                        <div class="expression-animation" id="animation-${agent.name}-${expr}">
+                                            <img src="/agents/${agent.name}/expressions/${expr}.gif?t=${Date.now()}" alt="${expr} animation">
+                                            <div class="expression-animation-controls">
+                                                <button onclick="event.stopPropagation(); deleteAnimation('${agent.name}', '${expr}')" title="Delete animation">
+                                                    🗑️
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ` : ''}
                                 </div>
                             `}).join('')}
                         </div>
@@ -2301,6 +2449,143 @@
                 btn.innerHTML = '📦 Generate All Missing';
                 // Clear generating states on completion
                 if (state) state.generatingExpressions = {};
+            }
+        }
+
+        // =====================================================
+        // Animation Generation Functions
+        // =====================================================
+        
+        let animationModalAgent = null;
+        let animationModalExpression = null;
+
+        async function openAnimationModal(agentName, expression) {
+            animationModalAgent = agentName;
+            animationModalExpression = expression;
+            
+            const modal = document.getElementById('animation-modal');
+            const title = document.getElementById('animation-modal-title');
+            const preview = document.getElementById('animation-modal-preview');
+            const promptInput = document.getElementById('animation-prompt');
+            
+            title.textContent = `Animate "${expression}" Expression`;
+            
+            // Show the source image
+            preview.innerHTML = `<img src="/agents/${agentName}/expressions/${expression}.png?t=${Date.now()}" alt="${expression}">`;
+            
+            // Fetch expression-specific default prompt from server
+            try {
+                const response = await fetch(`${API_BASE}/agents/${agentName}/expressions/${expression}/animation-prompt`);
+                if (response.ok) {
+                    const data = await response.json();
+                    promptInput.value = data.prompt || 'the person is talking naturally';
+                } else {
+                    promptInput.value = 'the person is talking naturally';
+                }
+            } catch (error) {
+                promptInput.value = 'the person is talking naturally';
+            }
+            
+            modal.classList.add('show');
+        }
+
+        function closeAnimationModal() {
+            document.getElementById('animation-modal').classList.remove('show');
+            animationModalAgent = null;
+            animationModalExpression = null;
+        }
+
+        async function generateAnimation() {
+            if (!animationModalAgent || !animationModalExpression) return;
+            
+            const agentName = animationModalAgent;
+            const expression = animationModalExpression;
+            const prompt = document.getElementById('animation-prompt').value.trim();
+            const duration = parseInt(document.getElementById('animation-duration').value) || 2;
+            const state = agentStates[agentName];
+            
+            if (!prompt) {
+                showToast('Please enter an animation prompt', 'error');
+                return;
+            }
+            
+            const btn = document.getElementById('animation-generate-btn');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Generating animation...';
+            
+            // Initialize animations state if not exists
+            if (!state.generatingAnimations) {
+                state.generatingAnimations = {};
+            }
+            state.generatingAnimations[expression] = true;
+            
+            closeAnimationModal();
+            
+            // Reload to show generating state
+            loadAvatarAgents();
+            
+            log(`Generating ${duration}s animation for ${agentName}/${expression}: ${prompt}...`, 'info');
+            showToast(`Generating ${duration}s animation... This may take 1-2 minutes.`, 'info');
+            
+            try {
+                const response = await fetch(`${API_BASE}/agents/${agentName}/generate-animation`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        expression,
+                        prompt,
+                        duration,
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    log(`Animation generated for ${agentName}/${expression}`, 'success');
+                    showToast(`Animation created for ${expression}!`, 'success');
+                } else {
+                    log(`Animation failed: ${data.message}`, 'error');
+                    showToast(data.message || 'Animation generation failed', 'error');
+                }
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+                showToast('Network error', 'error');
+            } finally {
+                // Clear generating state
+                if (state.generatingAnimations) {
+                    state.generatingAnimations[expression] = false;
+                }
+                btn.disabled = false;
+                btn.innerHTML = '🎬 Generate Animation';
+                loadAvatarAgents();
+            }
+        }
+
+        async function deleteAnimation(agentName, expression) {
+            if (!confirm(`Delete animation for "${expression}"?`)) {
+                return;
+            }
+            
+            log(`Deleting animation for ${agentName}/${expression}...`, 'info');
+            
+            try {
+                const response = await fetch(`${API_BASE}/agents/${agentName}/expressions/${expression}/animation`, {
+                    method: 'DELETE',
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    log(`Animation deleted for ${agentName}/${expression}`, 'success');
+                    showToast('Animation deleted', 'success');
+                    loadAvatarAgents();
+                } else {
+                    log(`Delete failed: ${data.message}`, 'error');
+                    showToast(data.message || 'Delete failed', 'error');
+                }
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+                showToast('Network error', 'error');
             }
         }
 

@@ -1,0 +1,24 @@
+# Animation prompts for expression animations
+# These describe the motion/action for each animated expression
+# Used with bytedance/seedance-1-pro-fast model
+# Note: Only "speaking" should involve talking - others are listening expressions
+
+# Default animation prompt (used if expression-specific one not found)
+default: "the person is listening attentively with subtle natural movements"
+
+# Expression-specific animation prompts
+neutral: "the person is listening calmly with a professional demeanor, subtle breathing and eye movements"
+happy: "the person is listening with a warm smile, eyes slightly crinkled, nodding gently"
+thinking: "the person is listening while thinking, slight head tilt, contemplative expression"
+interested: "the person is listening attentively, eyebrows slightly raised, nodding with interest"
+speaking: "the person is talking animatedly, natural mouth movements, emphasizing points"
+curious: "the person tilts head slightly while listening, eyes wide with curiosity"
+encouraging: "the person nods encouragingly while listening, warm supportive expression"
+thoughtful: "the person is listening with deep consideration, chin slightly raised"
+surprised: "the person reacts with mild surprise, eyebrows raised, attentive"
+concerned: "the person listens with empathy and care, showing concern"
+playful: "the person has a playful smirk, eyes twinkling, slight head movements suggesting mischief"
+angry: "the person looks frustrated, furrowed brow, tense jaw, slight head shake of disapproval"
+doubtful: "the person looks skeptical, one eyebrow raised, slight head tilt, questioning expression"
+laughing: "the person is laughing genuinely, shoulders shaking slightly, eyes crinkled with joy"
+sad: "the person looks sad and sympathetic, slight downward gaze, gentle nodding with understanding"

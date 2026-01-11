@@ -62,6 +62,19 @@ def get_expression_modifier(expression: str) -> str:
     return modifiers.get(expression, modifiers.get("neutral", "with a neutral expression"))
 
 
+def get_animation_prompt(expression: str) -> str:
+    """Get the animation prompt for a specific expression.
+    
+    Args:
+        expression: The expression name (e.g., 'happy', 'thinking').
+        
+    Returns:
+        The animation prompt string for that expression.
+    """
+    prompts = load_yaml_prompts("animation_prompts")
+    return prompts.get(expression, prompts.get("default", "the person is talking naturally"))
+
+
 def format_prompt(template_name: str, **kwargs) -> str:
     """Load and format a prompt template with the given variables.
     
