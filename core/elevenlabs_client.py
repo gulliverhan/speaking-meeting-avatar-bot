@@ -16,6 +16,7 @@ from typing import Any, Callable, Optional
 import websockets
 from websockets.client import WebSocketClientProtocol
 
+from core.instrumentation import get_metrics_collector
 from utils.logger import logger
 
 
@@ -31,6 +32,7 @@ class ElevenLabsClient:
         ws: The WebSocket connection instance.
         is_connected: Whether the client is currently connected.
         conversation_id: The current conversation session ID.
+        client_id: The bot client ID for instrumentation.
     """
 
     ELEVENLABS_WS_URL = "wss://api.elevenlabs.io/v1/convai/conversation"
@@ -43,6 +45,7 @@ class ElevenLabsClient:
         on_transcript: Optional[Callable[[str, str], Any]] = None,
         on_agent_response: Optional[Callable[[str], Any]] = None,
         on_tool_call: Optional[Callable[[str, dict], Any]] = None,
+        client_id: Optional[str] = None,
     ):
         """Initialize the ElevenLabs client.
 
@@ -53,6 +56,7 @@ class ElevenLabsClient:
             on_transcript: Callback for transcription events (role, text).
             on_agent_response: Callback for agent text responses.
             on_tool_call: Callback for tool calls from the agent.
+            client_id: Bot client ID for instrumentation tracking.
         """
         self.agent_id = agent_id
         self.api_key = api_key or os.getenv("ELEVENLABS_API_KEY")
@@ -60,12 +64,18 @@ class ElevenLabsClient:
         self.on_transcript = on_transcript
         self.on_agent_response = on_agent_response
         self.on_tool_call = on_tool_call
+        self.client_id = client_id
 
         self.ws: Optional[WebSocketClientProtocol] = None
         self.is_connected = False
         self.conversation_id: Optional[str] = None
         self._receive_task: Optional[asyncio.Task] = None
         self._closing = False
+        
+        # Instrumentation state
+        self._first_audio_received = False
+        self._is_bot_speaking = False
+        self._metrics = get_metrics_collector()
 
     def _build_ws_url(self) -> str:
         """Build the WebSocket URL with agent ID.
@@ -101,6 +111,8 @@ class ElevenLabsClient:
 
             self.is_connected = True
             self._closing = False
+            self._first_audio_received = False
+            self._is_bot_speaking = False
             logger.info("Connected to ElevenLabs WebSocket")
 
             # Start the receive loop
@@ -116,6 +128,20 @@ class ElevenLabsClient:
     async def disconnect(self) -> None:
         """Close the WebSocket connection."""
         self._closing = True
+        
+        # Record conversation end if we had one
+        if self.client_id and self.conversation_id:
+            # Record bot speech end if still speaking
+            if self._is_bot_speaking:
+                self._is_bot_speaking = False
+                self._metrics.record_bot_speech_end(
+                    bot_id=self.client_id,
+                    conversation_id=self.conversation_id,
+                )
+            self._metrics.record_conversation_end(
+                bot_id=self.client_id,
+                conversation_id=self.conversation_id,
+            )
 
         if self._receive_task:
             self._receive_task.cancel()
@@ -159,6 +185,15 @@ class ElevenLabsClient:
             message = {"user_audio_chunk": audio_base64}
 
             await self.ws.send(json.dumps(message))
+            
+            # Record instrumentation event
+            if self.client_id and self.conversation_id:
+                self._metrics.record_audio_sent_to_backend(
+                    bot_id=self.client_id,
+                    conversation_id=self.conversation_id,
+                    audio_bytes=len(audio_data),
+                )
+            
             return True
 
         except Exception as e:
@@ -224,23 +259,76 @@ class ElevenLabsClient:
             if event_type == "conversation_initiation_metadata":
                 self.conversation_id = data.get("conversation_id")
                 logger.info(f"Conversation initiated: {self.conversation_id}")
+                
+                # Record conversation start
+                if self.client_id and self.conversation_id:
+                    self._metrics.record_conversation_start(
+                        bot_id=self.client_id,
+                        conversation_id=self.conversation_id,
+                        backend_type="elevenlabs",
+                    )
 
             elif event_type == "audio":
                 # Agent audio response
                 audio_base64 = data.get("audio_event", {}).get("audio_base_64")
-                if audio_base64 and self.on_audio_received:
+                if audio_base64:
                     audio_bytes = base64.b64decode(audio_base64)
-                    await self._call_callback(self.on_audio_received, audio_bytes)
+                    
+                    # Record instrumentation events
+                    if self.client_id and self.conversation_id:
+                        # Record first audio byte (only once per response)
+                        if not self._first_audio_received:
+                            self._first_audio_received = True
+                            self._metrics.record_first_audio_byte(
+                                bot_id=self.client_id,
+                                conversation_id=self.conversation_id,
+                            )
+                        
+                        # Record bot speech start (only once per speaking session)
+                        if not self._is_bot_speaking:
+                            self._is_bot_speaking = True
+                            self._metrics.record_bot_speech_start(
+                                bot_id=self.client_id,
+                                conversation_id=self.conversation_id,
+                            )
+                    
+                    if self.on_audio_received:
+                        await self._call_callback(self.on_audio_received, audio_bytes)
 
             elif event_type == "agent_response":
                 # Agent text response
                 text = data.get("agent_response_event", {}).get("agent_response")
+                
+                # Record agent response
+                if self.client_id and self.conversation_id and text:
+                    self._metrics.record_agent_response_text(
+                        bot_id=self.client_id,
+                        conversation_id=self.conversation_id,
+                        text=text,
+                    )
+                
                 if text and self.on_agent_response:
                     await self._call_callback(self.on_agent_response, text)
 
             elif event_type == "user_transcript":
                 # User speech transcription
                 text = data.get("user_transcription_event", {}).get("user_transcript")
+                
+                # Record transcription received
+                if self.client_id and self.conversation_id:
+                    self._metrics.record_transcription_received(
+                        bot_id=self.client_id,
+                        conversation_id=self.conversation_id,
+                        text=text or "",
+                    )
+                    # Also mark user speech end (transcription means they stopped)
+                    self._metrics.record_user_speech_end(
+                        bot_id=self.client_id,
+                        conversation_id=self.conversation_id,
+                    )
+                    # Reset first audio flag for next response
+                    self._first_audio_received = False
+                
                 if text and self.on_transcript:
                     await self._call_callback(self.on_transcript, "user", text)
 
@@ -256,6 +344,20 @@ class ElevenLabsClient:
 
             elif event_type == "interruption":
                 logger.debug("User interruption detected")
+                
+                # Record interruption
+                if self.client_id and self.conversation_id:
+                    self._metrics.record_interruption(
+                        bot_id=self.client_id,
+                        conversation_id=self.conversation_id,
+                    )
+                    # Bot speech ended due to interruption
+                    if self._is_bot_speaking:
+                        self._is_bot_speaking = False
+                        self._metrics.record_bot_speech_end(
+                            bot_id=self.client_id,
+                            conversation_id=self.conversation_id,
+                        )
 
             elif event_type == "ping":
                 # Respond to ping with pong
@@ -268,6 +370,15 @@ class ElevenLabsClient:
 
             elif event_type == "internal_tentative_agent_response":
                 pass  # Tentative response before finalization
+            
+            elif event_type == "audio_done":
+                # Bot finished speaking this response
+                if self.client_id and self.conversation_id and self._is_bot_speaking:
+                    self._is_bot_speaking = False
+                    self._metrics.record_bot_speech_end(
+                        bot_id=self.client_id,
+                        conversation_id=self.conversation_id,
+                    )
 
             else:
                 logger.debug(f"Unhandled event type: {event_type}")
@@ -332,6 +443,7 @@ class ElevenLabsBridge:
             on_transcript=self._on_transcript,
             on_agent_response=self._on_agent_response,
             on_tool_call=self._on_tool_call,
+            client_id=client_id,  # Pass client_id for instrumentation
         )
 
     @property

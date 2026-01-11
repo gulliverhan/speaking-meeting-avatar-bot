@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import io
+import json
 import os
 from typing import Optional
 
@@ -17,6 +18,7 @@ from core.elevenlabs_client import (
     create_bridge,
     remove_bridge,
 )
+from core.instrumentation import get_metrics_collector, ConversationEvent
 from core.recall_client import get_recall_client
 from utils.logger import logger
 from utils.prompts import format_prompt
@@ -134,8 +136,56 @@ async def browser_websocket_endpoint(websocket: WebSocket, client_id: str):
             try:
                 message = await websocket.receive()
                 if "text" in message:
-                    # Browser might send status updates
-                    logger.debug(f"Browser message from {client_id}: {message['text'][:100]}")
+                    # Check if it's a metric event from browser-side instrumentation
+                    try:
+                        import json
+                        data = json.loads(message['text'])
+                        if data.get('type') == 'metric_event':
+                            # Forward browser metrics to our instrumentation system
+                            from core.instrumentation import metrics_collector, EventType, ConversationEvent
+                            event_type_str = data.get('event_type', '')
+                            
+                            # Map browser event types to our EventType enum
+                            event_type_map = {
+                                'conversation_start': EventType.CONVERSATION_START,
+                                'conversation_end': EventType.CONVERSATION_END,
+                                'user_speech_start': EventType.USER_SPEECH_START,
+                                'user_speech_end': EventType.USER_SPEECH_END,
+                                'bot_speech_start': EventType.BOT_SPEECH_START,
+                                'bot_speech_end': EventType.BOT_SPEECH_END,
+                                'transcription_received': EventType.TRANSCRIPTION_RECEIVED,
+                                'agent_response': EventType.AGENT_RESPONSE_TEXT,
+                                'interruption': EventType.INTERRUPTION,
+                            }
+                            
+                            event_type = event_type_map.get(event_type_str)
+                            if event_type:
+                                # Browser sends timestamp in seconds, convert to milliseconds
+                                timestamp_ms = data.get('timestamp', 0) * 1000
+                                conversation_id = data.get('conversation_id', f'conv_{client_id}')
+                                
+                                # Extract metadata from remaining fields
+                                metadata = {k: v for k, v in data.items() 
+                                           if k not in ('type', 'event_type', 'timestamp', 'conversation_id', 'client_id')}
+                                metadata['source'] = 'browser_sdk'
+                                
+                                # Create the event object
+                                event = ConversationEvent(
+                                    timestamp_ms=timestamp_ms,
+                                    event_type=event_type.value,
+                                    conversation_id=conversation_id,
+                                    bot_id=client_id,
+                                    metadata=metadata
+                                )
+                                
+                                metrics_collector.record_event(event)
+                                logger.debug(f"📊 Browser metric recorded: {event_type_str} for {client_id}")
+                            else:
+                                logger.warning(f"Unknown browser metric event type: {event_type_str}")
+                        else:
+                            logger.debug(f"Browser message from {client_id}: {message['text'][:100]}")
+                    except json.JSONDecodeError:
+                        logger.debug(f"Browser message from {client_id}: {message['text'][:100]}")
             except RuntimeError as e:
                 if "disconnect" in str(e).lower():
                     break
@@ -298,6 +348,9 @@ async def audio_websocket_endpoint(websocket: WebSocket, client_id: str):
 
     # Get Recall.ai client for sending audio back
     recall_client = get_recall_client()
+    
+    # Get metrics collector for instrumentation
+    metrics = get_metrics_collector()
 
     async def flush_audio_buffer():
         """Convert buffered PCM to MP3 and send to Recall.ai."""
@@ -399,6 +452,18 @@ async def audio_websocket_endpoint(websocket: WebSocket, client_id: str):
 
             if "bytes" in message:
                 audio_data = message["bytes"]
+                
+                # Record user audio received for instrumentation
+                # Note: ElevenLabs handles speech detection via transcription events
+                if bridge and bridge.conversation_id:
+                    # Only record periodically to avoid log spam (every ~1 second of audio)
+                    # 16kHz * 2 bytes * 1 second = 32000 bytes
+                    if len(audio_data) > 1000:
+                        metrics.record_user_audio_received(
+                            bot_id=client_id,
+                            conversation_id=bridge.conversation_id,
+                            audio_bytes=len(audio_data),
+                        )
                 
                 # Don't forward to ElevenLabs while we're speaking
                 # This prevents the bot from hearing its own voice
@@ -726,3 +791,205 @@ async def video_websocket_endpoint(websocket: WebSocket, client_id: str):
         for key in keys_to_remove:
             PARTICIPANT_FRAMES.pop(key, None)
         logger.info(f"Video WebSocket cleanup complete for {client_id}")
+
+
+# =============================================================================
+# Real-time Metrics WebSocket
+# =============================================================================
+
+# Store active metrics WebSocket connections
+METRICS_CONNECTIONS: dict[str, WebSocket] = {}
+
+
+@router.websocket("/ws/metrics")
+async def metrics_websocket_endpoint(websocket: WebSocket):
+    """Real-time WebSocket feed for instrumentation events.
+
+    Streams all instrumentation events as they occur, allowing
+    real-time monitoring of latency and conversation quality.
+
+    Events are sent as JSON with the format:
+    {
+        "type": "event",
+        "data": { ... event data ... }
+    }
+
+    Or for periodic summaries:
+    {
+        "type": "summary",
+        "data": { ... current metrics ... }
+    }
+    """
+    await websocket.accept()
+    connection_id = str(id(websocket))
+    METRICS_CONNECTIONS[connection_id] = websocket
+    logger.info(f"Metrics WebSocket connected: {connection_id}")
+    
+    metrics_collector = get_metrics_collector()
+    
+    # Event callback to forward events to this WebSocket
+    async def on_event(event: ConversationEvent):
+        try:
+            await websocket.send_json({
+                "type": "event",
+                "data": event.to_dict(),
+            })
+        except Exception as e:
+            logger.debug(f"Error sending metrics event: {e}")
+    
+    # Wrapper to handle async callback
+    def event_callback(event: ConversationEvent):
+        asyncio.create_task(on_event(event))
+    
+    # Subscribe to events
+    metrics_collector.subscribe_to_events(event_callback)
+    
+    try:
+        # Send initial state
+        await websocket.send_json({
+            "type": "connected",
+            "data": {
+                "total_conversations": len(metrics_collector.get_all_conversations()),
+            },
+        })
+        
+        # Keep connection alive and handle any incoming messages
+        while True:
+            try:
+                message = await websocket.receive()
+                
+                if "text" in message:
+                    text_data = message["text"]
+                    try:
+                        data = json.loads(text_data)
+                        cmd = data.get("command")
+                        
+                        # Handle commands from client
+                        if cmd == "get_summary":
+                            # Send current summary for all conversations
+                            conversations = metrics_collector.get_all_conversations()
+                            summaries = []
+                            for conv_id in conversations:
+                                conv_metrics = metrics_collector.get_conversation_metrics(conv_id)
+                                if conv_metrics:
+                                    summaries.append(conv_metrics.to_summary_dict())
+                            
+                            await websocket.send_json({
+                                "type": "summary",
+                                "data": {
+                                    "total_conversations": len(summaries),
+                                    "conversations": summaries,
+                                },
+                            })
+                        
+                        elif cmd == "get_bot_metrics":
+                            bot_id = data.get("bot_id")
+                            if bot_id:
+                                conv_metrics = metrics_collector.get_bot_metrics(bot_id)
+                                if conv_metrics:
+                                    await websocket.send_json({
+                                        "type": "bot_metrics",
+                                        "data": conv_metrics.to_summary_dict(),
+                                    })
+                                else:
+                                    await websocket.send_json({
+                                        "type": "error",
+                                        "data": {"message": "No metrics found for bot"},
+                                    })
+                    
+                    except json.JSONDecodeError:
+                        pass
+                        
+            except RuntimeError as e:
+                if "disconnect" in str(e).lower():
+                    break
+                raise
+                
+    except WebSocketDisconnect:
+        logger.info(f"Metrics WebSocket disconnected: {connection_id}")
+    except Exception as e:
+        logger.error(f"Metrics WebSocket error: {e}")
+    finally:
+        # Unsubscribe and clean up
+        metrics_collector.unsubscribe_from_events(event_callback)
+        METRICS_CONNECTIONS.pop(connection_id, None)
+        logger.info(f"Metrics WebSocket cleanup complete: {connection_id}")
+
+
+@router.websocket("/ws/metrics/{bot_id}")
+async def bot_metrics_websocket_endpoint(websocket: WebSocket, bot_id: str):
+    """Real-time WebSocket feed for a specific bot's metrics.
+
+    Filters events to only those related to the specified bot.
+
+    Args:
+        websocket: The WebSocket connection.
+        bot_id: The bot's client ID to filter events for.
+    """
+    await websocket.accept()
+    connection_id = f"{bot_id}_{id(websocket)}"
+    logger.info(f"Bot metrics WebSocket connected: {connection_id}")
+    
+    metrics_collector = get_metrics_collector()
+    
+    # Event callback filtered by bot_id
+    async def on_event(event: ConversationEvent):
+        if event.bot_id == bot_id:
+            try:
+                await websocket.send_json({
+                    "type": "event",
+                    "data": event.to_dict(),
+                })
+            except Exception as e:
+                logger.debug(f"Error sending bot metrics event: {e}")
+    
+    def event_callback(event: ConversationEvent):
+        asyncio.create_task(on_event(event))
+    
+    metrics_collector.subscribe_to_events(event_callback)
+    
+    try:
+        # Send initial state for this bot
+        conv_metrics = metrics_collector.get_bot_metrics(bot_id)
+        await websocket.send_json({
+            "type": "connected",
+            "data": {
+                "bot_id": bot_id,
+                "has_metrics": conv_metrics is not None,
+                "metrics": conv_metrics.to_summary_dict() if conv_metrics else None,
+            },
+        })
+        
+        # Keep connection alive
+        while True:
+            try:
+                message = await websocket.receive()
+                
+                if "text" in message:
+                    text_data = message["text"]
+                    try:
+                        data = json.loads(text_data)
+                        cmd = data.get("command")
+                        
+                        if cmd == "get_summary":
+                            conv_metrics = metrics_collector.get_bot_metrics(bot_id)
+                            if conv_metrics:
+                                await websocket.send_json({
+                                    "type": "summary",
+                                    "data": conv_metrics.to_summary_dict(),
+                                })
+                    except json.JSONDecodeError:
+                        pass
+                        
+            except RuntimeError as e:
+                if "disconnect" in str(e).lower():
+                    break
+                raise
+                
+    except WebSocketDisconnect:
+        logger.info(f"Bot metrics WebSocket disconnected: {connection_id}")
+    except Exception as e:
+        logger.error(f"Bot metrics WebSocket error: {e}")
+    finally:
+        metrics_collector.unsubscribe_from_events(event_callback)
+        logger.info(f"Bot metrics WebSocket cleanup complete: {connection_id}")

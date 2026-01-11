@@ -1,15 +1,18 @@
 """API routes for the meeting bot application."""
 
+import csv
+import io
 import os
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, Request, status
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
 from app.models import BotRequest, BotResponse, HealthResponse
 from core.agent_manager import get_agent_config, list_agents as list_agent_names
 from core.bot_state import BOT_STATES, BotState
+from core.instrumentation import get_metrics_collector
 from core.recall_client import get_recall_client, RecallClient
 from utils.logger import logger
 from utils.ngrok import LOCAL_DEV_MODE, determine_websocket_url
@@ -21,8 +24,8 @@ async def wait_for_call_start(
     recall_client: RecallClient, 
     recall_bot_id: str,
     max_attempts: int = 30,
-    poll_interval: float = 1.0,
-    visual_context_timeout: float = 10.0,
+    poll_interval: float = 0.5,
+    visual_context_timeout: float = 3.0,
 ) -> None:
     """Background task to send start_conversation signal when bot joins the call.
     
@@ -108,8 +111,8 @@ async def wait_for_call_start(
                             
                             # If we have visual context, inject it after the initial greeting
                             if video_participants:
-                                # Wait for agent's first message to finish (5s for "Hey! What's up?")
-                                await asyncio.sleep(5)
+                                # Wait briefly for agent's first message to start (2s for "Hey! What's up?")
+                                await asyncio.sleep(2)
                                 
                                 # Build context about who's in the meeting
                                 people_context = []
@@ -156,7 +159,7 @@ async def wait_for_call_start(
                                 
                                 # If there are screen shares, notify about them after a brief pause
                                 if screen_shares:
-                                    await asyncio.sleep(2)  # Let greeting happen first
+                                    await asyncio.sleep(1)  # Let greeting happen first
                                     screen_msg = "[System: Screen share active - " + "; ".join(screen_shares) + "]"
                                     await send_user_message_to_browser(client_id, screen_msg)
                                     logger.info(f"Injected screen share context: {screen_msg[:100]}...")
@@ -2004,3 +2007,187 @@ async def get_speaking_animation(agent_name: str, expression: str):
         )
     
     return FileResponse(gif_path, media_type="image/gif")
+
+
+# =============================================================================
+# Instrumentation & Metrics Endpoints
+# =============================================================================
+
+@router.get(
+    "/metrics",
+    tags=["metrics"],
+)
+async def get_all_metrics():
+    """Get summary metrics for all conversations.
+
+    Returns:
+        List of conversation summaries with key metrics.
+    """
+    metrics = get_metrics_collector()
+    conversations = metrics.get_all_conversations()
+    
+    summaries = []
+    for conv_id in conversations:
+        conv_metrics = metrics.get_conversation_metrics(conv_id)
+        if conv_metrics:
+            summaries.append(conv_metrics.to_summary_dict())
+    
+    return {
+        "total_conversations": len(summaries),
+        "conversations": summaries,
+    }
+
+
+@router.get(
+    "/metrics/export",
+    tags=["metrics"],
+)
+async def export_metrics(format: str = "json"):
+    """Export all metrics data for external analysis.
+
+    Args:
+        format: Export format ('json' or 'csv').
+
+    Returns:
+        All metrics data in the requested format.
+    """
+    metrics = get_metrics_collector()
+    data = metrics.export_all()
+    
+    if format == "csv":
+        # Convert to CSV format
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Header row
+        writer.writerow([
+            "conversation_id", "bot_id", "backend_type", "turn_id",
+            "turn_around_time_ms", "time_to_first_byte_ms", "transcription_latency_ms",
+            "full_response_time_ms", "had_overlap", "overlap_duration_ms", "was_interrupted"
+        ])
+        
+        # Data rows
+        for conv_id, conv_data in data.get("conversations", {}).items():
+            for turn in conv_data.get("turns", []):
+                writer.writerow([
+                    conv_id,
+                    conv_data.get("bot_id"),
+                    conv_data.get("backend_type"),
+                    turn.get("turn_id"),
+                    turn.get("turn_around_time_ms"),
+                    turn.get("time_to_first_byte_ms"),
+                    turn.get("transcription_latency_ms"),
+                    turn.get("full_response_time_ms"),
+                    turn.get("had_overlap"),
+                    turn.get("overlap_duration_ms"),
+                    turn.get("was_interrupted"),
+                ])
+        
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=metrics_export.csv"},
+        )
+    
+    # Default: JSON format
+    return data
+
+
+@router.get(
+    "/bots/{bot_id}/metrics",
+    tags=["metrics"],
+)
+async def get_bot_metrics(bot_id: str):
+    """Get metrics for a specific bot's current/most recent conversation.
+
+    Args:
+        bot_id: The bot's client ID.
+
+    Returns:
+        Metrics for the bot's conversation.
+    """
+    metrics = get_metrics_collector()
+    conv_metrics = metrics.get_bot_metrics(bot_id)
+    
+    if not conv_metrics:
+        return JSONResponse(
+            content={"message": "No metrics found for this bot", "bot_id": bot_id},
+            status_code=404,
+        )
+    
+    return conv_metrics.to_summary_dict()
+
+
+@router.get(
+    "/conversations/{conversation_id}/metrics",
+    tags=["metrics"],
+)
+async def get_conversation_metrics(conversation_id: str):
+    """Get detailed metrics for a specific conversation.
+
+    Args:
+        conversation_id: The conversation ID (from ElevenLabs).
+
+    Returns:
+        Full metrics including per-turn breakdown.
+    """
+    metrics = get_metrics_collector()
+    conv_metrics = metrics.get_conversation_metrics(conversation_id)
+    
+    if not conv_metrics:
+        return JSONResponse(
+            content={"message": "Conversation not found", "conversation_id": conversation_id},
+            status_code=404,
+        )
+    
+    return conv_metrics.to_full_dict()
+
+
+@router.get(
+    "/conversations/{conversation_id}/events",
+    tags=["metrics"],
+)
+async def get_conversation_events(conversation_id: str):
+    """Get raw event timeline for a conversation.
+
+    Args:
+        conversation_id: The conversation ID.
+
+    Returns:
+        List of all instrumentation events in chronological order.
+    """
+    metrics = get_metrics_collector()
+    events = metrics.get_conversation_events(conversation_id)
+    
+    if not events:
+        return JSONResponse(
+            content={"message": "No events found for this conversation", "conversation_id": conversation_id},
+            status_code=404,
+        )
+    
+    return {
+        "conversation_id": conversation_id,
+        "event_count": len(events),
+        "events": [e.to_dict() for e in events],
+    }
+
+
+@router.get(
+    "/metrics/stats",
+    tags=["metrics"],
+)
+async def get_metrics_stats():
+    """Get database statistics for the metrics system.
+
+    Returns:
+        Database stats including event count, conversation count, and storage path.
+    """
+    metrics = get_metrics_collector()
+    stats = metrics.store.get_database_stats()
+    
+    return {
+        "status": "healthy",
+        "storage": "sqlite",
+        **stats,
+    }
