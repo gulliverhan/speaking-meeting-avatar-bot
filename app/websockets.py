@@ -18,12 +18,69 @@ from core.elevenlabs_client import (
     create_bridge,
     remove_bridge,
 )
-from core.instrumentation import get_metrics_collector, ConversationEvent
+from core.instrumentation import get_metrics_collector, ConversationEvent, EventType
 from core.recall_client import get_recall_client
 from utils.logger import logger
 from utils.prompts import format_prompt
 
 router = APIRouter()
+
+# Browser metric event type mapping
+BROWSER_EVENT_TYPE_MAP: dict[str, EventType] = {
+    'conversation_start': EventType.CONVERSATION_START,
+    'conversation_end': EventType.CONVERSATION_END,
+    'user_speech_start': EventType.USER_SPEECH_START,
+    'user_speech_end': EventType.USER_SPEECH_END,
+    'bot_speech_start': EventType.BOT_SPEECH_START,
+    'bot_speech_end': EventType.BOT_SPEECH_END,
+    'transcription_received': EventType.TRANSCRIPTION_RECEIVED,
+    'agent_response': EventType.AGENT_RESPONSE_TEXT,
+    'interruption': EventType.INTERRUPTION,
+}
+
+# Allowed metadata keys from browser events (whitelist)
+BROWSER_METRIC_ALLOWED_METADATA_KEYS = frozenset({
+    'transcript', 'text', 'is_final', 'duration', 'source', 'audio_bytes',
+})
+
+# Maximum metadata string value length
+MAX_METADATA_VALUE_LENGTH = 1000
+
+
+def _sanitize_browser_metadata(data: dict, client_id: str) -> dict:
+    """Sanitize and whitelist metadata from browser metric events.
+    
+    Args:
+        data: Raw data from browser.
+        client_id: The client ID for logging.
+        
+    Returns:
+        Sanitized metadata dict with only allowed keys and safe values.
+    """
+    metadata = {}
+    excluded_keys = {'type', 'event_type', 'timestamp', 'conversation_id', 'client_id'}
+    
+    for key, value in data.items():
+        if key in excluded_keys:
+            continue
+        if key not in BROWSER_METRIC_ALLOWED_METADATA_KEYS:
+            continue
+        
+        # Sanitize value based on type
+        if isinstance(value, str):
+            # Truncate long strings
+            if len(value) > MAX_METADATA_VALUE_LENGTH:
+                value = value[:MAX_METADATA_VALUE_LENGTH] + '...'
+            metadata[key] = value
+        elif isinstance(value, (int, float, bool)):
+            metadata[key] = value
+        elif value is None:
+            metadata[key] = None
+        # Skip non-serializable types (lists, dicts, objects)
+    
+    metadata['source'] = 'browser_sdk'
+    return metadata
+
 
 # Store browser WebSocket connections by client_id
 # These are used to send transcription context from server to browser
@@ -136,56 +193,67 @@ async def browser_websocket_endpoint(websocket: WebSocket, client_id: str):
             try:
                 message = await websocket.receive()
                 if "text" in message:
-                    # Check if it's a metric event from browser-side instrumentation
+                    raw_text = message['text']
+                    
+                    # Try to parse as JSON
                     try:
-                        import json
-                        data = json.loads(message['text'])
-                        if data.get('type') == 'metric_event':
-                            # Forward browser metrics to our instrumentation system
-                            from core.instrumentation import metrics_collector, EventType, ConversationEvent
-                            event_type_str = data.get('event_type', '')
-                            
-                            # Map browser event types to our EventType enum
-                            event_type_map = {
-                                'conversation_start': EventType.CONVERSATION_START,
-                                'conversation_end': EventType.CONVERSATION_END,
-                                'user_speech_start': EventType.USER_SPEECH_START,
-                                'user_speech_end': EventType.USER_SPEECH_END,
-                                'bot_speech_start': EventType.BOT_SPEECH_START,
-                                'bot_speech_end': EventType.BOT_SPEECH_END,
-                                'transcription_received': EventType.TRANSCRIPTION_RECEIVED,
-                                'agent_response': EventType.AGENT_RESPONSE_TEXT,
-                                'interruption': EventType.INTERRUPTION,
-                            }
-                            
-                            event_type = event_type_map.get(event_type_str)
-                            if event_type:
-                                # Browser sends timestamp in seconds, convert to milliseconds
-                                timestamp_ms = data.get('timestamp', 0) * 1000
-                                conversation_id = data.get('conversation_id', f'conv_{client_id}')
-                                
-                                # Extract metadata from remaining fields
-                                metadata = {k: v for k, v in data.items() 
-                                           if k not in ('type', 'event_type', 'timestamp', 'conversation_id', 'client_id')}
-                                metadata['source'] = 'browser_sdk'
-                                
-                                # Create the event object
-                                event = ConversationEvent(
-                                    timestamp_ms=timestamp_ms,
-                                    event_type=event_type.value,
-                                    conversation_id=conversation_id,
-                                    bot_id=client_id,
-                                    metadata=metadata
-                                )
-                                
-                                metrics_collector.record_event(event)
-                                logger.debug(f"📊 Browser metric recorded: {event_type_str} for {client_id}")
-                            else:
-                                logger.warning(f"Unknown browser metric event type: {event_type_str}")
-                        else:
-                            logger.debug(f"Browser message from {client_id}: {message['text'][:100]}")
+                        data = json.loads(raw_text)
                     except json.JSONDecodeError:
-                        logger.debug(f"Browser message from {client_id}: {message['text'][:100]}")
+                        logger.debug(f"Browser message from {client_id}: {raw_text[:100]}")
+                        continue
+                    
+                    # Check if it's a metric event from browser-side instrumentation
+                    if not isinstance(data, dict) or data.get('type') != 'metric_event':
+                        logger.debug(f"Browser message from {client_id}: {raw_text[:100]}")
+                        continue
+                    
+                    # Validate and process metric event
+                    try:
+                        # Require event_type to be present and valid
+                        event_type_str = data.get('event_type')
+                        if not isinstance(event_type_str, str) or not event_type_str:
+                            logger.warning(f"Browser metric missing event_type from {client_id}")
+                            continue
+                        
+                        event_type = BROWSER_EVENT_TYPE_MAP.get(event_type_str)
+                        if event_type is None:
+                            logger.warning(f"Unknown browser metric event type: {event_type_str}")
+                            continue
+                        
+                        # Coerce and clamp timestamp to non-negative int (browser sends ms)
+                        raw_timestamp = data.get('timestamp', 0)
+                        try:
+                            timestamp_ms = max(0, int(raw_timestamp))
+                        except (ValueError, TypeError):
+                            logger.warning(f"Invalid timestamp from {client_id}: {raw_timestamp}")
+                            timestamp_ms = 0
+                        
+                        # Safe conversation_id with fallback
+                        conversation_id = data.get('conversation_id')
+                        if not isinstance(conversation_id, str) or not conversation_id:
+                            conversation_id = f'conv_{client_id}'
+                        
+                        # Sanitize metadata
+                        metadata = _sanitize_browser_metadata(data, client_id)
+                        
+                        # Get metrics collector singleton
+                        metrics_collector = get_metrics_collector()
+                        
+                        # Create the event object
+                        event = ConversationEvent(
+                            timestamp_ms=timestamp_ms,
+                            event_type=event_type.value,
+                            conversation_id=conversation_id,
+                            bot_id=client_id,
+                            metadata=metadata
+                        )
+                        
+                        metrics_collector.record_event(event)
+                        logger.debug(f"📊 Browser metric recorded: {event_type_str} for {client_id}")
+                        
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Malformed browser metric from {client_id}: {e}")
+                        
             except RuntimeError as e:
                 if "disconnect" in str(e).lower():
                     break
@@ -217,7 +285,6 @@ async def send_context_to_browser(client_id: str, context: str, speaker: str = N
         return False
 
     try:
-        import json
         await ws.send_text(json.dumps({
             "type": "context_update",
             "context": context,
@@ -247,7 +314,6 @@ async def send_user_message_to_browser(client_id: str, message: str) -> bool:
         return False
 
     try:
-        import json
         await ws.send_text(json.dumps({
             "type": "user_message",
             "message": message
@@ -274,7 +340,6 @@ async def send_expression_to_browser(client_id: str, expression: str) -> bool:
         return False
 
     try:
-        import json
         await ws.send_text(json.dumps({
             "type": "expression_change",
             "expression": expression
@@ -298,7 +363,6 @@ async def broadcast_expression_to_all_browsers(expression: str) -> int:
     Returns:
         Number of browsers the message was sent to.
     """
-    import json
     message = json.dumps({
         "type": "expression_change",
         "expression": expression
@@ -666,7 +730,6 @@ async def video_websocket_endpoint(websocket: WebSocket, client_id: str):
             
             if "text" in message:
                 try:
-                    import json
                     data = json.loads(message["text"])
                     event_type = data.get("event", "unknown")
                     

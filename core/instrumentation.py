@@ -604,8 +604,9 @@ class ConversationStore:
         self._events: dict[str, list[ConversationEvent]] = defaultdict(list)
         self._metrics: dict[str, ConversationMetrics] = {}
         self._current_turn: dict[str, TurnMetrics] = {}
-        self._speaking_state: dict[str, dict] = {}  # bot_id -> {user: bool, bot: bool}
+        self._speaking_state: dict[str, dict] = {}  # bot_id -> {user: bool, bot: bool, overlap_active: bool, overlap_start_ts: float}
         self._subscribers: list[Callable[[ConversationEvent], None]] = []
+        self._pending_overlap_events: list[ConversationEvent] = []  # Overlap events to persist outside lock
         
         # Initialize database
         self._db = MetricsDatabase(db_path)
@@ -679,22 +680,38 @@ class ConversationStore:
             
             # Initialize speaking state if needed
             if bot_id not in self._speaking_state:
-                self._speaking_state[bot_id] = {"user": False, "bot": False}
+                self._speaking_state[bot_id] = {
+                    "user": False, 
+                    "bot": False,
+                    "overlap_active": False,
+                    "overlap_start_ts": None
+                }
             
             # Process the event
             self._process_event(event)
+            
+            # Grab any pending overlap events to persist outside lock
+            pending_overlap = list(self._pending_overlap_events)
+            self._pending_overlap_events.clear()
         
         # Persist to database (outside lock for better concurrency)
         try:
             self._db.save_event(event)
+            # Also persist any overlap events that were generated
+            for overlap_event in pending_overlap:
+                self._db.save_event(overlap_event)
         except Exception as e:
             logger.error(f"Error saving event to database: {e}")
         
         # Notify subscribers (outside lock to avoid deadlocks)
         self._notify_subscribers(event)
+        for overlap_event in pending_overlap:
+            self._notify_subscribers(overlap_event)
         
         # Log the event as structured JSON
         self._log_event(event)
+        for overlap_event in pending_overlap:
+            self._log_event(overlap_event)
     
     def _process_event(self, event: ConversationEvent) -> None:
         """Process an event and update metrics.
@@ -732,6 +749,8 @@ class ConversationStore:
             speaking["user"] = False
             if conv_id in self._current_turn:
                 self._current_turn[conv_id].user_speech_end_ms = ts
+            # Check if overlap ended
+            self._check_overlap_end(bot_id, conv_id, ts)
         
         # Handle audio sent to backend
         elif event_type == EventType.AUDIO_SENT_TO_BACKEND:
@@ -759,6 +778,8 @@ class ConversationStore:
         
         elif event_type == EventType.BOT_SPEECH_END:
             speaking["bot"] = False
+            # Check if overlap ended (after clearing bot speaking state)
+            self._check_overlap_end(bot_id, conv_id, ts)
             if conv_id in self._current_turn:
                 self._current_turn[conv_id].bot_speech_end_ms = ts
                 # Finalize the turn
@@ -772,13 +793,22 @@ class ConversationStore:
     def _check_overlap(self, bot_id: str, conv_id: str, ts: float) -> None:
         """Check if both user and bot are speaking (overlap).
         
-        Called with lock held.
+        Called with lock held. Only emits OVERLAP_START when transitioning
+        from non-overlapping to overlapping state.
         """
         speaking = self._speaking_state.get(bot_id, {})
-        if speaking.get("user") and speaking.get("bot"):
+        both_speaking = speaking.get("user") and speaking.get("bot")
+        already_overlapping = speaking.get("overlap_active", False)
+        
+        if both_speaking and not already_overlapping:
+            # Starting a new overlap
+            speaking["overlap_active"] = True
+            speaking["overlap_start_ts"] = ts
+            
             if conv_id in self._current_turn:
                 self._current_turn[conv_id].had_overlap = True
-            # Record overlap event
+            
+            # Create and persist overlap start event
             overlap_event = ConversationEvent(
                 timestamp_ms=ts,
                 event_type=EventType.OVERLAP_START,
@@ -786,7 +816,48 @@ class ConversationStore:
                 bot_id=bot_id,
             )
             self._events[conv_id].append(overlap_event)
-            logger.warning(f"Overlap detected in conversation {conv_id}")
+            
+            # Persist to database (will be done outside lock)
+            self._pending_overlap_events.append(overlap_event)
+            
+            logger.warning(f"Overlap started in conversation {conv_id}")
+    
+    def _check_overlap_end(self, bot_id: str, conv_id: str, ts: float) -> None:
+        """Check if an active overlap has ended.
+        
+        Called with lock held when either user or bot stops speaking.
+        """
+        speaking = self._speaking_state.get(bot_id, {})
+        both_speaking = speaking.get("user") and speaking.get("bot")
+        was_overlapping = speaking.get("overlap_active", False)
+        
+        if was_overlapping and not both_speaking:
+            # Overlap has ended
+            speaking["overlap_active"] = False
+            overlap_start_ts = speaking.get("overlap_start_ts")
+            speaking["overlap_start_ts"] = None
+            
+            # Calculate overlap duration
+            duration_ms = (ts - overlap_start_ts) if overlap_start_ts else 0
+            
+            # Update current turn's overlap duration
+            if conv_id in self._current_turn:
+                self._current_turn[conv_id].overlap_duration_ms += duration_ms
+            
+            # Create and persist overlap end event
+            overlap_event = ConversationEvent(
+                timestamp_ms=ts,
+                event_type=EventType.OVERLAP_END,
+                conversation_id=conv_id,
+                bot_id=bot_id,
+                metadata={"duration_ms": duration_ms}
+            )
+            self._events[conv_id].append(overlap_event)
+            
+            # Persist to database (will be done outside lock)
+            self._pending_overlap_events.append(overlap_event)
+            
+            logger.info(f"Overlap ended in conversation {conv_id} (duration: {duration_ms:.0f}ms)")
     
     def _finalize_turn(self, conv_id: str) -> None:
         """Finalize the current turn and add to metrics.
@@ -954,15 +1025,33 @@ class MetricsCollector:
     to record events. It provides convenient methods for each event type
     and handles timestamp generation.
     
+    The collector can be enabled/disabled at runtime via the `enabled` property.
+    When disabled, no events are recorded but API calls still succeed silently.
+    
     Usage:
         collector = get_metrics_collector()
         collector.record_user_speech_start(bot_id, conversation_id)
         # ... later ...
         collector.record_bot_speech_end(bot_id, conversation_id)
+        
+        # Disable collection
+        collector.enabled = False
     """
     
     def __init__(self, store: Optional[ConversationStore] = None):
         self.store = store or ConversationStore()
+        self._enabled = True  # Metrics collection enabled by default
+    
+    @property
+    def enabled(self) -> bool:
+        """Whether metrics collection is enabled."""
+        return self._enabled
+    
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        """Enable or disable metrics collection."""
+        self._enabled = bool(value)
+        logger.info(f"Metrics collection {'enabled' if self._enabled else 'disabled'}")
     
     def _now_ms(self) -> float:
         """Get current timestamp in milliseconds."""
@@ -975,8 +1064,14 @@ class MetricsCollector:
         conversation_id: str,
         turn_id: Optional[int] = None,
         metadata: Optional[dict] = None,
-    ) -> ConversationEvent:
-        """Record an event with the given parameters."""
+    ) -> Optional[ConversationEvent]:
+        """Record an event with the given parameters.
+        
+        Returns None if metrics collection is disabled.
+        """
+        if not self._enabled:
+            return None
+        
         event = ConversationEvent(
             timestamp_ms=self._now_ms(),
             event_type=event_type,
@@ -993,7 +1088,11 @@ class MetricsCollector:
         
         This is useful when receiving events from external sources (like browser SDK)
         that already have timestamps and metadata populated.
+        
+        Does nothing if metrics collection is disabled.
         """
+        if not self._enabled:
+            return
         self.store.record_event(event)
     
     # Conversation lifecycle
