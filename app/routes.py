@@ -2191,3 +2191,59 @@ async def get_metrics_stats():
         "storage": "sqlite",
         **stats,
     }
+
+
+@router.get(
+    "/metrics/config",
+    tags=["metrics"],
+)
+async def get_metrics_config():
+    """Get the current metrics collection configuration.
+
+    Returns:
+        Current configuration including whether collection is enabled.
+    """
+    metrics = get_metrics_collector()
+    return {
+        "enabled": metrics.enabled,
+    }
+
+
+@router.put(
+    "/metrics/config",
+    tags=["metrics"],
+)
+async def set_metrics_config(request: Request):
+    """Set metrics collection configuration.
+
+    Args:
+        request: Request with 'enabled' boolean.
+
+    Returns:
+        Updated configuration.
+    """
+    try:
+        body = await request.json()
+        enabled = body.get("enabled")
+        
+        if enabled is None:
+            return JSONResponse(
+                content={"message": "'enabled' field is required"},
+                status_code=400,
+            )
+        
+        metrics = get_metrics_collector()
+        metrics.enabled = bool(enabled)
+        
+        logger.info(f"Metrics collection {'enabled' if metrics.enabled else 'disabled'} via API")
+        
+        return {
+            "success": True,
+            "enabled": metrics.enabled,
+        }
+    except Exception as e:
+        logger.error(f"Error setting metrics config: {e}")
+        return JSONResponse(
+            content={"message": f"Error: {str(e)}"},
+            status_code=500,
+        )

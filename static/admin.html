@@ -2015,6 +2015,7 @@
                 if (tabId === 'agents') {
                     loadAvatarAgents();
                 } else if (tabId === 'stats') {
+                    loadMetricsConfig();
                     loadMetrics();
                 }
             });
@@ -2026,6 +2027,46 @@
 
         let metricsData = [];
         let currentProviderFilter = 'all';
+
+        // Metrics collection toggle
+        const metricsEnabledCheckbox = document.getElementById('metrics-enabled');
+        
+        async function loadMetricsConfig() {
+            try {
+                const response = await fetch(`${API_BASE}/metrics/config`);
+                if (!response.ok) throw new Error('Failed to fetch metrics config');
+                const config = await response.json();
+                metricsEnabledCheckbox.checked = config.enabled;
+                log(`Metrics collection: ${config.enabled ? 'enabled' : 'disabled'}`, 'info');
+            } catch (error) {
+                log(`Error loading metrics config: ${error.message}`, 'error');
+                console.error('Metrics config error:', error);
+            }
+        }
+        
+        async function setMetricsEnabled(enabled) {
+            try {
+                const response = await fetch(`${API_BASE}/metrics/config`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                if (!response.ok) throw new Error('Failed to update metrics config');
+                const result = await response.json();
+                showToast(`Metrics collection ${result.enabled ? 'enabled' : 'disabled'}`, 'success');
+                log(`Metrics collection ${result.enabled ? 'enabled' : 'disabled'}`, 'success');
+            } catch (error) {
+                log(`Error setting metrics config: ${error.message}`, 'error');
+                showToast(`Error: ${error.message}`, 'error');
+                // Revert checkbox on error
+                metricsEnabledCheckbox.checked = !enabled;
+            }
+        }
+        
+        // Add event listener for metrics toggle
+        metricsEnabledCheckbox.addEventListener('change', (e) => {
+            setMetricsEnabled(e.target.checked);
+        });
 
         async function loadMetrics() {
             try {
