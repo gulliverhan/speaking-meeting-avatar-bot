@@ -17,9 +17,10 @@ An AI meeting assistant that joins video calls via Recall.ai, powered by ElevenL
 
 ### 🎭 Avatar System
 - **Dynamic expressions** - Avatar changes based on conversation (happy, thinking, interested, etc.)
-- **Automatic speaking mode** - Expression switches when agent speaks
+- **Animated avatars** - Each expression has idle (listening) and speaking GIF animations
 - **Custom avatars** - Generate avatars using AI image generation (Replicate)
 - **Expression packs** - Generate consistent expression sets from a base image
+- **Smart prompts** - Idle animation prompts are saved and auto-inherited by speaking animations
 
 ### 🎮 Admin Dashboard
 - **Deploy bots** - One-click deployment to any meeting URL
@@ -79,9 +80,14 @@ Then open http://localhost:7014/static/admin.html
 ```
 recall_elevenlabs/
 ├── agents/                    # Agent configurations
-│   ├── meeting_facilitator/   # Meeting facilitator agent
+│   ├── meeting_facilitator/   # Example agent
 │   │   ├── config.yaml        # Agent config (tools, prompt, voice)
-│   │   ├── expressions/       # Avatar expression images
+│   │   ├── expressions/       # Avatar expression images & animations
+│   │   │   ├── neutral.png    # Static expression (required)
+│   │   │   ├── neutral.gif    # Idle animation (optional)
+│   │   │   ├── neutral_speaking.gif  # Speaking animation (optional)
+│   │   │   └── ...
+│   │   ├── custom_animation_prompts.yaml  # Saved animation prompts
 │   │   ├── avatar_name.txt    # Display name
 │   │   └── voice_id.txt       # ElevenLabs voice ID
 │   └── case_study_interviewer/
@@ -96,6 +102,7 @@ recall_elevenlabs/
 │   ├── elevenlabs_client.py  # ElevenLabs API client
 │   └── elevenlabs_agent_sync.py  # Sync agents to ElevenLabs
 ├── prompts/                   # Prompt templates
+│   ├── animation_prompts.yaml    # Default animation prompts per expression
 │   ├── participant_analysis.txt  # Vision analysis prompt
 │   ├── default_system_prompt.txt # Default agent prompt
 │   └── expression_modifiers.yaml # Expression descriptions
@@ -103,7 +110,7 @@ recall_elevenlabs/
 │   ├── admin.html            # Admin dashboard
 │   └── index.html            # Bot webpage (avatar display)
 └── utils/                     # Utilities
-    ├── image_generator.py    # Replicate image generation
+    ├── image_generator.py    # Replicate image/animation generation
     ├── prompts.py            # Prompt loading utilities
     └── ngrok.py              # ngrok tunnel detection
 ```
@@ -127,6 +134,9 @@ recall_elevenlabs/
 | `/bots/{id}` | DELETE | Remove bot |
 | `/agents` | GET | List available agents |
 | `/agents/{name}/sync` | POST | Sync agent to ElevenLabs |
+| `/agents/avatar-status` | GET | Get avatar/animation status for all agents |
+| `/agents/{name}/generate-animation` | POST | Generate idle or speaking animation |
+| `/agents/{name}/expressions/{expr}/animation-prompt` | GET | Get animation prompt (with saved customizations) |
 | `/webhooks/tools/set_expression` | POST | Set avatar expression |
 | `/webhooks/tools/get_meeting_context` | GET | Get visual context |
 
@@ -148,7 +158,7 @@ expressions:
   - happy
   - thinking
   - interested
-  - speaking
+  - curious
 
 system_prompt: |
   You are a professional meeting facilitator...
@@ -161,6 +171,41 @@ system_prompt: |
 3. Write a prompt and generate base avatar
 4. Generate expression pack from base
 5. (Optional) Upload a reference image for consistency
+
+### Animated Expressions
+
+Each expression can have three visual states:
+- **Static PNG** (required) - Fallback when no animation exists
+- **Idle GIF** (optional) - Played when listening/waiting
+- **Speaking GIF** (optional) - Played when the agent is talking
+
+**Generating animations:**
+
+1. In the Admin Dashboard, each expression card shows two buttons:
+   - 👁️ Generate idle animation (when listening)
+   - 🗣️ Generate speaking animation (when talking)
+
+2. When generating an **idle** animation:
+   - Customize the prompt (e.g., "professional woman listening calmly, subtle breathing")
+   - Your prompt is saved for this expression
+
+3. When generating a **speaking** animation:
+   - The saved idle prompt is auto-loaded with speaking modifiers added
+   - This ensures visual consistency between idle and speaking states
+
+**Animation prompts are stored in:**
+- `agents/{name}/custom_animation_prompts.yaml` - Per-agent saved prompts
+- `prompts/animation_prompts.yaml` - Default prompts per expression type
+
+**Example `animation_prompts.yaml`:**
+```yaml
+neutral:
+  idle: "the person is listening calmly with subtle breathing and eye movements"
+  speaking: "the person is talking calmly with natural mouth movements"
+happy:
+  idle: "the person is listening with a warm smile, nodding gently"
+  speaking: "the person is talking happily with animated mouth movements"
+```
 
 ## 🔄 Frame & Context Caching
 
