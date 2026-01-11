@@ -13,7 +13,7 @@ from core.bot_state import BOT_STATES, BotState
 from core.recall_client import get_recall_client, RecallClient
 from utils.logger import logger
 from utils.ngrok import LOCAL_DEV_MODE, determine_websocket_url
-from utils.prompts import format_prompt, get_expression_modifier
+from utils.prompts import format_prompt, get_expression_modifier, get_animation_prompt
 
 
 async def wait_for_call_start(
@@ -580,7 +580,8 @@ async def list_bots(client_request: Request):
     # Check status of each bot and clean up ended ones
     bots_to_remove = []
     
-    for bot_id, state in BOT_STATES.items():
+    # Create a snapshot to avoid "dictionary changed size during iteration" errors
+    for bot_id, state in list(BOT_STATES.items()):
         if state.recall_bot_id:
             try:
                 bot_data = await recall_client.get_bot(state.recall_bot_id)
@@ -957,21 +958,30 @@ async def get_agent_elevenlabs_config(agent_name: str):
     tags=["agents"],
 )
 async def get_agent_expressions(agent_name: str):
-    """Get the list of expressions for an agent.
+    """Get the list of expressions for an agent, including animation status.
 
     Args:
         agent_name: Name of the agent.
 
     Returns:
-        List of expression names.
+        List of expression names and which have animations.
     """
+    from pathlib import Path
+    
     if agent_name not in list_agent_names():
-        return {"expressions": ["neutral", "speaking"]}  # Fallback
+        return {"expressions": ["neutral", "speaking"], "animations": {}}  # Fallback
     
     agent_config = get_agent_config(agent_name)
     expressions = agent_config.get("expressions", ["neutral", "happy", "thinking", "interested", "speaking"])
     
-    return {"expressions": expressions}
+    # Check which expressions have animated GIFs
+    expressions_path = Path("agents") / agent_name / "expressions"
+    animations = {}
+    for expr in expressions:
+        gif_path = expressions_path / f"{expr}.gif"
+        animations[expr] = gif_path.exists()
+    
+    return {"expressions": expressions, "animations": animations}
 
 
 @router.get(
@@ -997,17 +1007,21 @@ async def get_agents_avatar_status():
         # Get list of expressions from config or default
         expressions = agent_config.get("expressions", ["neutral", "happy", "thinking", "interested"])
         
-        # Check which expression images exist
+        # Check which expression images and animations exist
         expression_images = {}
+        expression_animations = {}
         has_base = False
         for expr in expressions:
             img_path = expressions_path / f"{expr}.png"
+            gif_path = expressions_path / f"{expr}.gif"
             if img_path.exists():
                 expression_images[expr] = True
                 if expr == "neutral":
                     has_base = True
             else:
                 expression_images[expr] = False
+            # Check for animation GIF
+            expression_animations[expr] = gif_path.exists()
         
         # Check if base.png exists (the reference image for expressions)
         base_path = expressions_path / "base.png"
@@ -1037,6 +1051,7 @@ async def get_agents_avatar_status():
             "display_name": agent_config.get("name", agent_name.replace("_", " ").title()),
             "expressions": expressions,
             "expression_images": expression_images,
+            "expression_animations": expression_animations,  # Track which have GIF animations
             "has_base_avatar": has_base,
             "base_image_url": base_image_url,  # URL to display base image
             "avatar_prompt": avatar_prompt,
@@ -1654,3 +1669,197 @@ async def get_expression_image(agent_name: str, expression: str):
         )
     
     return FileResponse(image_path, media_type="image/png")
+
+
+# =============================================================================
+# Animation Endpoints
+# =============================================================================
+
+@router.get(
+    "/agents/{agent_name}/expressions/{expression}.gif",
+    tags=["agents"],
+)
+async def get_expression_animation(agent_name: str, expression: str):
+    """Serve an animated GIF for an expression.
+
+    Args:
+        agent_name: Name of the agent.
+        expression: Expression name (e.g., "neutral", "happy").
+
+    Returns:
+        The animated GIF file.
+    """
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+    
+    gif_path = Path("agents") / agent_name / "expressions" / f"{expression}.gif"
+    
+    if not gif_path.exists():
+        return JSONResponse(
+            content={"message": "Animation not found"},
+            status_code=404,
+        )
+    
+    return FileResponse(gif_path, media_type="image/gif")
+
+
+@router.post(
+    "/agents/{agent_name}/generate-animation",
+    tags=["agents"],
+)
+async def generate_expression_animation_endpoint(agent_name: str, request: Request):
+    """Generate an animated GIF for an expression.
+
+    Uses bytedance/seedance-1-pro-fast to create a talking animation from
+    a static expression image, then converts to a looping GIF.
+
+    Args:
+        agent_name: Name of the agent.
+        request: Request with expression name, animation prompt, and duration.
+
+    Returns:
+        Generated animation info.
+    """
+    from utils.image_generator import generate_expression_animation
+    from utils.ngrok import get_public_url
+    from pathlib import Path
+    
+    try:
+        body = await request.json()
+        expression = body.get("expression", "")
+        prompt = body.get("prompt", "the person is talking")
+        duration = body.get("duration", 2)  # Default 2 seconds
+    except Exception:
+        return JSONResponse(
+            content={"message": "Invalid request body"},
+            status_code=400,
+        )
+    
+    if not expression:
+        return JSONResponse(
+            content={"message": "expression is required"},
+            status_code=400,
+        )
+    
+    # Check agent exists
+    if agent_name not in list_agent_names():
+        return JSONResponse(
+            content={"message": f"Agent '{agent_name}' not found"},
+            status_code=404,
+        )
+    
+    # Check source image exists
+    image_path = Path("agents") / agent_name / "expressions" / f"{expression}.png"
+    if not image_path.exists():
+        return JSONResponse(
+            content={"message": f"Expression image '{expression}.png' not found. Generate the static image first."},
+            status_code=400,
+        )
+    
+    # Get public URL for Replicate to access our images
+    public_url = get_public_url()
+    if not public_url:
+        return JSONResponse(
+            content={"message": "No public URL available (ngrok not running?). Animation generation requires a public URL."},
+            status_code=500,
+        )
+    
+    output_gif_path = Path("agents") / agent_name / "expressions" / f"{expression}.gif"
+    
+    logger.info(f"Generating {duration}s animation for {agent_name}/{expression}: {prompt[:50]}...")
+    
+    try:
+        result = await generate_expression_animation(
+            image_path=image_path,
+            output_gif_path=output_gif_path,
+            prompt=prompt,
+            public_base_url=public_url,
+            duration=duration,
+        )
+        
+        if result.get("success"):
+            return {
+                "success": True,
+                "expression": expression,
+                "gif_path": str(output_gif_path),
+                "prompt": prompt,
+            }
+        else:
+            return JSONResponse(
+                content={"message": result.get("error", "Animation generation failed")},
+                status_code=500,
+            )
+    except Exception as e:
+        logger.error(f"Error generating animation: {e}")
+        return JSONResponse(
+            content={"message": f"Error generating animation: {str(e)}"},
+            status_code=500,
+        )
+
+
+@router.get(
+    "/agents/{agent_name}/expressions/{expression}/animation-prompt",
+    tags=["agents"],
+)
+async def get_expression_animation_prompt(agent_name: str, expression: str):
+    """Get the default animation prompt for an expression.
+
+    Args:
+        agent_name: Name of the agent.
+        expression: Expression name.
+
+    Returns:
+        Default animation prompt for this expression.
+    """
+    prompt = get_animation_prompt(expression)
+    return {
+        "expression": expression,
+        "prompt": prompt,
+    }
+
+
+@router.delete(
+    "/agents/{agent_name}/expressions/{expression}/animation",
+    tags=["agents"],
+)
+async def delete_expression_animation(agent_name: str, expression: str):
+    """Delete an animated GIF for an expression.
+
+    Args:
+        agent_name: Name of the agent.
+        expression: Expression name.
+
+    Returns:
+        Deletion status.
+    """
+    from pathlib import Path
+    
+    # Check agent exists
+    if agent_name not in list_agent_names():
+        return JSONResponse(
+            content={"message": f"Agent '{agent_name}' not found"},
+            status_code=404,
+        )
+    
+    gif_path = Path("agents") / agent_name / "expressions" / f"{expression}.gif"
+    
+    if not gif_path.exists():
+        return JSONResponse(
+            content={"message": "Animation not found"},
+            status_code=404,
+        )
+    
+    try:
+        gif_path.unlink()
+        logger.info(f"Deleted animation: {gif_path}")
+        return {
+            "success": True,
+            "expression": expression,
+            "deleted": str(gif_path),
+        }
+    except Exception as e:
+        logger.error(f"Error deleting animation: {e}")
+        return JSONResponse(
+            content={"message": f"Error deleting animation: {str(e)}"},
+            status_code=500,
+        )

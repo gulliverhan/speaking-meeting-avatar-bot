@@ -4,12 +4,15 @@ Supports Replicate models:
 - google/nano-banana-pro (highest quality, supports image input)
 - google/nano-banana (good quality, supports image input)
 - prunaai/p-image (cheap and fast)
+- bytedance/seedance-1-pro-fast (video/animation generation)
 
 All configured for small image sizes suitable for video conferencing avatars.
 """
 
 import asyncio
 import os
+import subprocess
+import tempfile
 import httpx
 from pathlib import Path
 from typing import Any, Optional
@@ -325,3 +328,352 @@ async def _generate_replicate(
     except Exception as e:
         logger.error(f"Replicate generation error: {e}")
         return {"success": False, "error": str(e)}
+
+
+# =============================================================================
+# Animation Generation
+# =============================================================================
+
+# Default animation settings for bytedance/seedance-1-pro-fast
+DEFAULT_ANIMATION_SETTINGS = {
+    "fps": 24,
+    "prompt": "the person is talking",
+    "duration": 5,
+    "resolution": "480p",
+    "aspect_ratio": "1:1",
+    "camera_fixed": True,
+}
+
+
+async def generate_animation(
+    image_url: str,
+    prompt: str = "the person is talking",
+    output_path: Optional[Path] = None,
+    fps: int = 24,
+    duration: int = 5,
+) -> dict[str, Any]:
+    """Generate an animated video from a static image using Replicate.
+
+    Uses bytedance/seedance-1-pro-fast model to create a talking animation.
+
+    Args:
+        image_url: Public URL of the source image.
+        prompt: Animation prompt describing the motion (e.g., "the person is talking").
+        output_path: Optional path to save the video file.
+        fps: Frames per second (default 24).
+        duration: Duration in seconds (default 5).
+
+    Returns:
+        Dict with success status and video_url or error.
+    """
+    api_key = os.getenv("REPLICATE_API_TOKEN")
+    if not api_key:
+        return {"success": False, "error": "REPLICATE_API_TOKEN not set in environment"}
+
+    model_name = "bytedance/seedance-1-pro-fast"
+    
+    logger.info(f"Generating animation: {prompt[:50]}...")
+
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:  # 5 min timeout for video
+            model_input = {
+                "fps": fps,
+                "prompt": prompt,
+                "duration": duration,
+                "resolution": "480p",
+                "aspect_ratio": "1:1",
+                "camera_fixed": True,
+                "image": image_url,
+            }
+            
+            # Start the prediction
+            response = await client.post(
+                f"https://api.replicate.com/v1/models/{model_name}/predictions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"input": model_input},
+            )
+            
+            if response.status_code not in (200, 201):
+                error_text = response.text
+                logger.error(f"Replicate API error: {error_text}")
+                return {"success": False, "error": f"Replicate API error: {error_text}"}
+            
+            prediction = response.json()
+            prediction_id = prediction.get("id")
+            
+            if not prediction_id:
+                return {"success": False, "error": "No prediction ID returned"}
+            
+            logger.info(f"Started animation prediction: {prediction_id}")
+            
+            # Poll for completion (video takes longer)
+            for attempt in range(150):  # Max 5 minutes
+                await asyncio.sleep(2)
+                
+                status_response = await client.get(
+                    f"https://api.replicate.com/v1/predictions/{prediction_id}",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                
+                if status_response.status_code != 200:
+                    continue
+                
+                status_data = status_response.json()
+                status = status_data.get("status")
+                
+                if status == "succeeded":
+                    output = status_data.get("output")
+                    
+                    # Get the video URL
+                    if isinstance(output, str):
+                        video_url = output
+                    elif isinstance(output, dict) and "url" in output:
+                        video_url = output["url"]
+                    else:
+                        logger.error(f"Unexpected output format: {output}")
+                        return {"success": False, "error": f"Unexpected output format: {type(output)}"}
+                    
+                    logger.info(f"Animation generated: {video_url[:50]}...")
+                    
+                    # Download and save if output_path provided
+                    if output_path:
+                        video_response = await client.get(video_url)
+                        video_response.raise_for_status()
+                        output_path.write_bytes(video_response.content)
+                        logger.info(f"Saved video to: {output_path}")
+                    
+                    return {
+                        "success": True,
+                        "video_url": video_url,
+                        "saved_to": str(output_path) if output_path else None,
+                    }
+                    
+                elif status == "failed":
+                    error = status_data.get("error", "Unknown error")
+                    logger.error(f"Animation prediction failed: {error}")
+                    return {"success": False, "error": error}
+                    
+                elif status == "canceled":
+                    return {"success": False, "error": "Prediction was canceled"}
+                
+                # Log progress occasionally
+                if attempt % 15 == 0:
+                    logger.info(f"Animation still generating... status: {status}")
+            
+            return {"success": False, "error": "Animation timed out after 5 minutes"}
+            
+    except httpx.TimeoutException:
+        return {"success": False, "error": "Request timed out"}
+    except Exception as e:
+        logger.error(f"Animation generation error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def _run_ffmpeg_sync(
+    palette_cmd: list[str],
+    gif_cmd: list[str],
+    simple_cmd: list[str],
+    palette_path: Path,
+    gif_path: Path,
+) -> dict[str, Any]:
+    """Synchronous ffmpeg execution (to be run in executor).
+
+    This function handles the actual subprocess calls and palette cleanup.
+    """
+    try:
+        # Run palette generation
+        result = subprocess.run(
+            palette_cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        if result.returncode != 0:
+            logger.error(f"Palette generation failed: {result.stderr}")
+            # Try simpler one-pass conversion (no palette needed)
+            result = subprocess.run(
+                simple_cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                return {"success": False, "error": f"FFmpeg error: {result.stderr}"}
+        else:
+            # Run GIF generation with palette
+            try:
+                result = subprocess.run(
+                    gif_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+
+                if result.returncode != 0:
+                    logger.error(f"GIF generation failed: {result.stderr}")
+                    return {"success": False, "error": f"FFmpeg error: {result.stderr}"}
+            finally:
+                # Always clean up palette file after two-pass attempt
+                if palette_path.exists():
+                    palette_path.unlink()
+
+        if gif_path.exists():
+            logger.info(f"GIF created: {gif_path} ({gif_path.stat().st_size / 1024:.1f}KB)")
+            return {
+                "success": True,
+                "gif_path": str(gif_path),
+                "size_bytes": gif_path.stat().st_size,
+            }
+        else:
+            return {"success": False, "error": "GIF file was not created"}
+
+    except subprocess.TimeoutExpired:
+        # Clean up palette on timeout too
+        if palette_path.exists():
+            palette_path.unlink()
+        return {"success": False, "error": "FFmpeg conversion timed out"}
+    except FileNotFoundError:
+        return {"success": False, "error": "FFmpeg not found. Please install ffmpeg."}
+    except Exception as e:
+        # Clean up palette on any error
+        if palette_path.exists():
+            palette_path.unlink()
+        logger.error(f"GIF conversion error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+async def convert_video_to_gif(
+    video_path: Path,
+    gif_path: Path,
+    fps: int = 15,
+    scale: int = 256,
+) -> dict[str, Any]:
+    """Convert a video file to an animated GIF using ffmpeg.
+
+    Args:
+        video_path: Path to the source video file.
+        gif_path: Path to save the output GIF.
+        fps: Output frame rate (default 15 for smaller file size).
+        scale: Width in pixels (height auto-calculated, default 256).
+
+    Returns:
+        Dict with success status and gif_path or error.
+    """
+    if not video_path.exists():
+        return {"success": False, "error": f"Video file not found: {video_path}"}
+
+    # Prepare paths and commands
+    palette_path = video_path.parent / f"{video_path.stem}_palette.png"
+
+    palette_cmd = [
+        "ffmpeg", "-y",
+        "-i", str(video_path),
+        "-vf", f"fps={fps},scale={scale}:-1:flags=lanczos,palettegen",
+        str(palette_path),
+    ]
+
+    gif_cmd = [
+        "ffmpeg", "-y",
+        "-i", str(video_path),
+        "-i", str(palette_path),
+        "-lavfi", f"fps={fps},scale={scale}:-1:flags=lanczos[x];[x][1:v]paletteuse",
+        str(gif_path),
+    ]
+
+    simple_cmd = [
+        "ffmpeg", "-y",
+        "-i", str(video_path),
+        "-vf", f"fps={fps},scale={scale}:-1:flags=lanczos",
+        str(gif_path),
+    ]
+
+    # Run ffmpeg in executor to avoid blocking the event loop
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        _run_ffmpeg_sync,
+        palette_cmd,
+        gif_cmd,
+        simple_cmd,
+        palette_path,
+        gif_path,
+    )
+
+
+async def generate_expression_animation(
+    image_path: Path,
+    output_gif_path: Path,
+    prompt: str = "the person is talking",
+    public_base_url: Optional[str] = None,
+    duration: int = 2,
+) -> dict[str, Any]:
+    """Generate an animated GIF from a static expression image.
+
+    This is a high-level function that:
+    1. Uploads/serves the image for Replicate to access
+    2. Generates a video animation
+    3. Converts the video to a looping GIF
+    4. Cleans up temporary files
+
+    Args:
+        image_path: Path to the source expression PNG.
+        output_gif_path: Path to save the output GIF.
+        prompt: Animation prompt describing the motion.
+        public_base_url: Public URL base for serving the image to Replicate.
+        duration: Duration in seconds (default 2).
+
+    Returns:
+        Dict with success status and gif_path or error.
+    """
+    if not image_path.exists():
+        return {"success": False, "error": f"Image not found: {image_path}"}
+    
+    if not public_base_url:
+        return {"success": False, "error": "Public URL required for Replicate to access the image"}
+    
+    # Build public URL for the image
+    # Assuming image_path is like: agents/{agent_name}/expressions/{expression}.png
+    relative_path = image_path.relative_to(Path("."))
+    image_url = f"{public_base_url}/{relative_path}"
+    
+    logger.info(f"Generating animation from: {image_url}")
+    
+    # Create temp directory for video
+    temp_video_path = image_path.parent / f"{image_path.stem}_temp.mp4"
+    
+    try:
+        # Step 1: Generate video animation
+        video_result = await generate_animation(
+            image_url=image_url,
+            prompt=prompt,
+            output_path=temp_video_path,
+            duration=duration,
+        )
+        
+        if not video_result.get("success"):
+            return video_result
+        
+        # Step 2: Convert video to GIF
+        gif_result = await convert_video_to_gif(
+            video_path=temp_video_path,
+            gif_path=output_gif_path,
+        )
+        
+        if not gif_result.get("success"):
+            return gif_result
+        
+        return {
+            "success": True,
+            "gif_path": str(output_gif_path),
+            "prompt": prompt,
+        }
+        
+    finally:
+        # Clean up temp video file
+        if temp_video_path.exists():
+            temp_video_path.unlink()
+            logger.debug(f"Cleaned up temp video: {temp_video_path}")
