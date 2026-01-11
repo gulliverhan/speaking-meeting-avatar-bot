@@ -62,17 +62,39 @@ def get_expression_modifier(expression: str) -> str:
     return modifiers.get(expression, modifiers.get("neutral", "with a neutral expression"))
 
 
-def get_animation_prompt(expression: str) -> str:
-    """Get the animation prompt for a specific expression.
+def get_animation_prompt(expression: str, animation_type: str = "idle") -> str:
+    """Get the animation prompt for a specific expression and animation type.
     
     Args:
         expression: The expression name (e.g., 'happy', 'thinking').
+        animation_type: Either 'idle' (listening) or 'speaking' (talking).
         
     Returns:
-        The animation prompt string for that expression.
+        The animation prompt string for that expression and type.
     """
     prompts = load_yaml_prompts("animation_prompts")
-    return prompts.get(expression, prompts.get("default", "the person is talking naturally"))
+    
+    # Get the expression config (should be a dict with idle/speaking keys)
+    expr_config = prompts.get(expression, prompts.get("default", {}))
+    
+    # Handle both old flat format (string) and new nested format (dict)
+    if isinstance(expr_config, str):
+        # Old format - just a string, use it for idle, add speaking suffix for speaking
+        if animation_type == "speaking":
+            return expr_config.replace("listening", "talking").replace("is listening", "is talking")
+        return expr_config
+    elif isinstance(expr_config, dict):
+        # New format - dict with idle/speaking keys
+        prompt = expr_config.get(animation_type)
+        if prompt:
+            return prompt
+        # Fallback to default if specific type not found
+        default_config = prompts.get("default", {})
+        if isinstance(default_config, dict):
+            return default_config.get(animation_type, "the person is talking naturally")
+        return default_config if isinstance(default_config, str) else "the person is talking naturally"
+    
+    return "the person is talking naturally"
 
 
 def format_prompt(template_name: str, **kwargs) -> str:

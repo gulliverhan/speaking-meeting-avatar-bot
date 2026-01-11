@@ -1,24 +1,69 @@
 # Animation prompts for expression animations
 # These describe the motion/action for each animated expression
 # Used with bytedance/seedance-1-pro-fast model
-# Note: Only "speaking" should involve talking - others are listening expressions
+#
+# Each expression has two variants:
+# - idle: Used when the avatar is listening (no mouth movement)
+# - speaking: Used when the avatar is talking (with mouth movement)
 
-# Default animation prompt (used if expression-specific one not found)
-default: "the person is listening attentively with subtle natural movements"
+# Default animation prompts (used if expression-specific one not found)
+default:
+  idle: "the person is listening attentively with subtle natural movements"
+  speaking: "the person is talking naturally with clear mouth movements"
 
 # Expression-specific animation prompts
-neutral: "the person is listening calmly with a professional demeanor, subtle breathing and eye movements"
-happy: "the person is listening with a warm smile, eyes slightly crinkled, nodding gently"
-thinking: "the person is listening while thinking, slight head tilt, contemplative expression"
-interested: "the person is listening attentively, eyebrows slightly raised, nodding with interest"
-speaking: "the person is talking animatedly, natural mouth movements, emphasizing points"
-curious: "the person tilts head slightly while listening, eyes wide with curiosity"
-encouraging: "the person nods encouragingly while listening, warm supportive expression"
-thoughtful: "the person is listening with deep consideration, chin slightly raised"
-surprised: "the person reacts with mild surprise, eyebrows raised, attentive"
-concerned: "the person listens with empathy and care, showing concern"
-playful: "the person has a playful smirk, eyes twinkling, slight head movements suggesting mischief"
-angry: "the person looks frustrated, furrowed brow, tense jaw, slight head shake of disapproval"
-doubtful: "the person looks skeptical, one eyebrow raised, slight head tilt, questioning expression"
-laughing: "the person is laughing genuinely, shoulders shaking slightly, eyes crinkled with joy"
-sad: "the person looks sad and sympathetic, slight downward gaze, gentle nodding with understanding"
+neutral:
+  idle: "the person is listening calmly with a professional demeanor, subtle breathing and eye movements"
+  speaking: "the person is talking calmly with natural mouth movements, maintaining a professional demeanor"
+
+happy:
+  idle: "the person is listening with a warm smile, eyes slightly crinkled, nodding gently"
+  speaking: "the person is talking happily with a warm smile, animated mouth movements, eyes crinkled with joy"
+
+thinking:
+  idle: "the person is listening while thinking, slight head tilt, contemplative expression"
+  speaking: "the person is talking thoughtfully, slight pauses, contemplative expression with natural mouth movements"
+
+interested:
+  idle: "the person is listening attentively, eyebrows slightly raised, nodding with interest"
+  speaking: "the person is talking with interest, eyebrows animated, engaged expression with clear mouth movements"
+
+curious:
+  idle: "the person tilts head slightly while listening, eyes wide with curiosity"
+  speaking: "the person is asking questions curiously, head tilted, eyes wide, animated mouth movements"
+
+encouraging:
+  idle: "the person nods encouragingly while listening, warm supportive expression"
+  speaking: "the person is speaking encouragingly, warm smile, nodding, supportive tone with animated mouth"
+
+thoughtful:
+  idle: "the person is listening with deep consideration, chin slightly raised"
+  speaking: "the person is speaking thoughtfully, measured pace, chin slightly raised, deliberate mouth movements"
+
+surprised:
+  idle: "the person reacts with mild surprise, eyebrows raised, attentive"
+  speaking: "the person is speaking with surprise, eyebrows raised, animated expression and mouth movements"
+
+concerned:
+  idle: "the person listens with empathy and care, showing concern"
+  speaking: "the person is speaking with concern, empathetic expression, caring tone with gentle mouth movements"
+
+playful:
+  idle: "the person has a playful smirk, eyes twinkling, slight head movements suggesting mischief"
+  speaking: "the person is speaking playfully, mischievous smirk, eyes twinkling, animated and fun mouth movements"
+
+angry:
+  idle: "the person looks frustrated, furrowed brow, tense jaw, slight head shake of disapproval"
+  speaking: "the person is speaking with frustration, furrowed brow, intense expression, emphatic mouth movements"
+
+doubtful:
+  idle: "the person looks skeptical, one eyebrow raised, slight head tilt, questioning expression"
+  speaking: "the person is speaking skeptically, one eyebrow raised, questioning tone with deliberate mouth movements"
+
+laughing:
+  idle: "the person is laughing genuinely, shoulders shaking slightly, eyes crinkled with joy"
+  speaking: "the person is speaking while laughing, joyful expression, intermittent laughs between words"
+
+sad:
+  idle: "the person looks sad and sympathetic, slight downward gaze, gentle nodding with understanding"
+  speaking: "the person is speaking sadly, downcast expression, gentle and soft mouth movements"

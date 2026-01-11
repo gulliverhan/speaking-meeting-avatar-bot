@@ -935,16 +935,47 @@
             animation: pulse 1s infinite;
         }
 
-        .animation-badge {
+        .animation-badges {
             position: absolute;
             top: 0.375rem;
             left: 0.375rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            z-index: 10;
+        }
+
+        .animation-badge {
             padding: 0.125rem 0.375rem;
-            background: rgba(99, 102, 241, 0.9);
             border-radius: 4px;
             font-size: 0.625rem;
             color: white;
             font-weight: 500;
+        }
+
+        .animation-badge.idle {
+            background: rgba(99, 102, 241, 0.9);
+        }
+
+        .animation-badge.speaking {
+            background: rgba(16, 185, 129, 0.9);
+        }
+
+        .animation-type-label {
+            font-size: 0.625rem;
+            color: var(--text-muted);
+            margin-right: 0.25rem;
+        }
+
+        .expression-card-actions {
+            display: flex;
+            gap: 0.25rem;
+            justify-content: center;
+        }
+
+        .expression-card-actions button {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.875rem;
         }
     </style>
 </head>
@@ -1153,7 +1184,7 @@
             <div class="form-group">
                 <label>Animation Prompt</label>
                 <textarea id="animation-prompt" placeholder="Describe the motion you want...">the person is talking</textarea>
-                <p class="form-hint">Describe what the person should be doing. Common prompts: "the person is talking", "the person is nodding and smiling", "the person is listening attentively"</p>
+                <p class="form-hint" id="animation-prompt-hint">Describe what the person should be doing. For idle: "the person is listening calmly". For speaking: motion will be added automatically.</p>
             </div>
             <div class="form-group">
                 <label>Duration (seconds)</label>
@@ -2030,14 +2061,20 @@
                         <div class="expression-grid-editor">
                             ${expressions.map(expr => {
                                 const hasImage = agent.expression_images?.[expr];
-                                const hasAnimation = agent.expression_animations?.[expr];
+                                const hasIdleAnimation = agent.expression_idle_animations?.[expr];
+                                const hasSpeakingAnimation = agent.expression_speaking_animations?.[expr];
                                 const isGenerating = state.generatingExpressions?.[expr];
-                                const isAnimating = state.generatingAnimations?.[expr];
+                                const isAnimatingIdle = state.generatingAnimations?.[expr + '_idle'];
+                                const isAnimatingSpeaking = state.generatingAnimations?.[expr + '_speaking'];
+                                const isAnimating = isAnimatingIdle || isAnimatingSpeaking;
                                 return `
                                 <div class="expression-card ${hasImage ? 'has-image' : ''} ${isGenerating ? 'generating' : ''}" 
                                      id="expr-card-${agent.name}-${expr}">
                                     <div class="expression-card-image" onclick="openExpressionEditor('${agent.name}', '${expr}')" style="cursor: pointer;">
-                                        ${hasAnimation ? '<span class="animation-badge">🎬 Animated</span>' : ''}
+                                        <div class="animation-badges">
+                                            ${hasIdleAnimation ? '<span class="animation-badge idle">👁️ Idle</span>' : ''}
+                                            ${hasSpeakingAnimation ? '<span class="animation-badge speaking">🗣️ Speaking</span>' : ''}
+                                        </div>
                                         ${isGenerating ? `
                                             <div class="spinner"></div>
                                         ` : hasImage ? `
@@ -2057,17 +2094,33 @@
                                     </div>
                                     ${hasImage ? `
                                         <div class="expression-card-actions">
-                                            <button onclick="event.stopPropagation(); openAnimationModal('${agent.name}', '${expr}')" 
-                                                    ${isAnimating ? 'disabled class="generating"' : ''}>
-                                                ${isAnimating ? '⏳ Animating...' : (hasAnimation ? '🔄 Re-animate' : '🎬 Animate')}
+                                            <button onclick="event.stopPropagation(); openAnimationModal('${agent.name}', '${expr}', 'idle')" 
+                                                    ${isAnimatingIdle ? 'disabled class="generating"' : ''} title="Generate idle animation (when listening)">
+                                                ${isAnimatingIdle ? '⏳...' : (hasIdleAnimation ? '👁️' : '👁️')}
+                                            </button>
+                                            <button onclick="event.stopPropagation(); openAnimationModal('${agent.name}', '${expr}', 'speaking')" 
+                                                    ${isAnimatingSpeaking ? 'disabled class="generating"' : ''} title="Generate speaking animation (when talking)">
+                                                ${isAnimatingSpeaking ? '⏳...' : (hasSpeakingAnimation ? '🗣️' : '🗣️')}
                                             </button>
                                         </div>
                                     ` : ''}
-                                    ${hasAnimation ? `
-                                        <div class="expression-animation" id="animation-${agent.name}-${expr}">
-                                            <img src="/agents/${agent.name}/expressions/${expr}.gif?t=${Date.now()}" alt="${expr} animation">
+                                    ${hasIdleAnimation ? `
+                                        <div class="expression-animation" id="animation-idle-${agent.name}-${expr}">
+                                            <span class="animation-type-label">Idle:</span>
+                                            <img src="/agents/${agent.name}/expressions/${expr}.gif?t=${Date.now()}" alt="${expr} idle animation">
                                             <div class="expression-animation-controls">
-                                                <button onclick="event.stopPropagation(); deleteAnimation('${agent.name}', '${expr}')" title="Delete animation">
+                                                <button onclick="event.stopPropagation(); deleteAnimation('${agent.name}', '${expr}', 'idle')" title="Delete idle animation">
+                                                    🗑️
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                    ${hasSpeakingAnimation ? `
+                                        <div class="expression-animation" id="animation-speaking-${agent.name}-${expr}">
+                                            <span class="animation-type-label">Speaking:</span>
+                                            <img src="/agents/${agent.name}/expressions/${expr}_speaking.gif?t=${Date.now()}" alt="${expr} speaking animation">
+                                            <div class="expression-animation-controls">
+                                                <button onclick="event.stopPropagation(); deleteAnimation('${agent.name}', '${expr}', 'speaking')" title="Delete speaking animation">
                                                     🗑️
                                                 </button>
                                             </div>
@@ -2458,32 +2511,52 @@
         
         let animationModalAgent = null;
         let animationModalExpression = null;
+        let animationModalType = 'idle';  // 'idle' or 'speaking'
 
-        async function openAnimationModal(agentName, expression) {
+        async function openAnimationModal(agentName, expression, animationType = 'idle') {
             animationModalAgent = agentName;
             animationModalExpression = expression;
+            animationModalType = animationType;
             
             const modal = document.getElementById('animation-modal');
             const title = document.getElementById('animation-modal-title');
             const preview = document.getElementById('animation-modal-preview');
             const promptInput = document.getElementById('animation-prompt');
+            const hintEl = document.getElementById('animation-prompt-hint');
             
-            title.textContent = `Animate "${expression}" Expression`;
+            const typeLabel = animationType === 'speaking' ? 'Speaking' : 'Idle (Listening)';
+            title.textContent = `Generate ${typeLabel} Animation for "${expression}"`;
             
             // Show the source image
             preview.innerHTML = `<img src="/agents/${agentName}/expressions/${expression}.png?t=${Date.now()}" alt="${expression}">`;
             
-            // Fetch expression-specific default prompt from server
+            // Fetch expression-specific prompt from server (may be customized)
             try {
-                const response = await fetch(`${API_BASE}/agents/${agentName}/expressions/${expression}/animation-prompt`);
+                const response = await fetch(`${API_BASE}/agents/${agentName}/expressions/${expression}/animation-prompt?animation_type=${animationType}`);
                 if (response.ok) {
                     const data = await response.json();
-                    promptInput.value = data.prompt || 'the person is talking naturally';
+                    promptInput.value = data.prompt || 'the person is listening naturally';
+                    
+                    // Update hint based on context
+                    if (animationType === 'speaking' && data.has_custom_idle) {
+                        hintEl.textContent = '✨ Based on your saved idle prompt + speaking modifiers. Edit if needed.';
+                        hintEl.style.color = 'var(--success)';
+                    } else if (animationType === 'idle') {
+                        hintEl.textContent = '💡 Tip: Customize this! Your idle prompt will be saved and auto-used for the speaking animation.';
+                        hintEl.style.color = 'var(--accent-hover)';
+                    } else {
+                        hintEl.textContent = 'Describe what the person should be doing. Generate an idle animation first to save a base prompt.';
+                        hintEl.style.color = 'var(--text-muted)';
+                    }
                 } else {
-                    promptInput.value = 'the person is talking naturally';
+                    promptInput.value = animationType === 'speaking' ? 'the person is talking naturally' : 'the person is listening naturally';
+                    hintEl.textContent = 'Describe what the person should be doing.';
+                    hintEl.style.color = 'var(--text-muted)';
                 }
             } catch (error) {
-                promptInput.value = 'the person is talking naturally';
+                promptInput.value = animationType === 'speaking' ? 'the person is talking naturally' : 'the person is listening naturally';
+                hintEl.textContent = 'Describe what the person should be doing.';
+                hintEl.style.color = 'var(--text-muted)';
             }
             
             modal.classList.add('show');
@@ -2500,6 +2573,7 @@
             
             const agentName = animationModalAgent;
             const expression = animationModalExpression;
+            const animationType = animationModalType;
             const prompt = document.getElementById('animation-prompt').value.trim();
             const duration = parseInt(document.getElementById('animation-duration').value) || 2;
             const state = agentStates[agentName];
@@ -2517,15 +2591,16 @@
             if (!state.generatingAnimations) {
                 state.generatingAnimations = {};
             }
-            state.generatingAnimations[expression] = true;
+            state.generatingAnimations[expression + '_' + animationType] = true;
             
             closeAnimationModal();
             
             // Reload to show generating state
             loadAvatarAgents();
             
-            log(`Generating ${duration}s animation for ${agentName}/${expression}: ${prompt}...`, 'info');
-            showToast(`Generating ${duration}s animation... This may take 1-2 minutes.`, 'info');
+            const typeLabel = animationType === 'speaking' ? 'speaking' : 'idle';
+            log(`Generating ${duration}s ${typeLabel} animation for ${agentName}/${expression}: ${prompt}...`, 'info');
+            showToast(`Generating ${duration}s ${typeLabel} animation... This may take 1-2 minutes.`, 'info');
             
             try {
                 const response = await fetch(`${API_BASE}/agents/${agentName}/generate-animation`, {
@@ -2533,6 +2608,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         expression,
+                        animation_type: animationType,
                         prompt,
                         duration,
                     }),
@@ -2541,8 +2617,8 @@
                 const data = await response.json();
 
                 if (response.ok) {
-                    log(`Animation generated for ${agentName}/${expression}`, 'success');
-                    showToast(`Animation created for ${expression}!`, 'success');
+                    log(`${typeLabel} animation generated for ${agentName}/${expression}`, 'success');
+                    showToast(`${typeLabel.charAt(0).toUpperCase() + typeLabel.slice(1)} animation created for ${expression}!`, 'success');
                 } else {
                     log(`Animation failed: ${data.message}`, 'error');
                     showToast(data.message || 'Animation generation failed', 'error');
@@ -2553,7 +2629,7 @@
             } finally {
                 // Clear generating state
                 if (state.generatingAnimations) {
-                    state.generatingAnimations[expression] = false;
+                    state.generatingAnimations[expression + '_' + animationType] = false;
                 }
                 btn.disabled = false;
                 btn.innerHTML = '🎬 Generate Animation';
@@ -2561,23 +2637,24 @@
             }
         }
 
-        async function deleteAnimation(agentName, expression) {
-            if (!confirm(`Delete animation for "${expression}"?`)) {
+        async function deleteAnimation(agentName, expression, animationType = 'idle') {
+            const typeLabel = animationType === 'speaking' ? 'speaking' : 'idle';
+            if (!confirm(`Delete ${typeLabel} animation for "${expression}"?`)) {
                 return;
             }
             
-            log(`Deleting animation for ${agentName}/${expression}...`, 'info');
+            log(`Deleting ${typeLabel} animation for ${agentName}/${expression}...`, 'info');
             
             try {
-                const response = await fetch(`${API_BASE}/agents/${agentName}/expressions/${expression}/animation`, {
+                const response = await fetch(`${API_BASE}/agents/${agentName}/expressions/${expression}/animation?animation_type=${animationType}`, {
                     method: 'DELETE',
                 });
 
                 const data = await response.json();
 
                 if (response.ok) {
-                    log(`Animation deleted for ${agentName}/${expression}`, 'success');
-                    showToast('Animation deleted', 'success');
+                    log(`${typeLabel} animation deleted for ${agentName}/${expression}`, 'success');
+                    showToast(`${typeLabel.charAt(0).toUpperCase() + typeLabel.slice(1)} animation deleted`, 'success');
                     loadAvatarAgents();
                 } else {
                     log(`Delete failed: ${data.message}`, 'error');
