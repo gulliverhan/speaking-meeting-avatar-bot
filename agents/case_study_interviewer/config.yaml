@@ -17,7 +17,7 @@ elevenlabs:
     This conversation is being recorded and will be edited into case study content.
     
     FACIAL EXPRESSIONS:
-    Use set_expression() to show emotion. "speaking" is automatic when you talk.
+    Use set_expression() to show emotion. Your expression automatically animates when speaking.
     - "neutral" - transitions, professional moments
     - "happy" - celebrating their wins, good results, positive moments
     - "thinking" - processing what they've said, formulating next question
@@ -65,4 +65,3 @@ expressions:
   - doubtful
   - laughing
   - sad
-  - speaking

@@ -129,14 +129,16 @@
         const statusEl = document.getElementById('status');
         
         // Expression images - loaded dynamically based on agent config
-        let expressions = ['neutral', 'speaking'];  // Fallback
-        let expressionAnimations = {};  // Track which expressions have GIF animations
+        let expressions = ['neutral'];  // Fallback
+        let idleAnimations = {};  // Track which expressions have idle GIF animations
+        let speakingAnimations = {};  // Track which expressions have speaking GIF animations
         const preloadedImages = {};
-        const preloadedGifs = {};
+        const preloadedIdleGifs = {};
+        const preloadedSpeakingGifs = {};
         
         function preloadImages() {
             expressions.forEach(expr => {
-                // Preload PNG
+                // Preload PNG (always required)
                 const img = new Image();
                 img.onload = () => log(`Loaded PNG: ${expr}`);
                 img.onerror = () => log(`Missing PNG: ${expr} (will use neutral)`, 'warn');
@@ -147,13 +149,22 @@
                 }
                 preloadedImages[expr] = img;
                 
-                // Preload GIF if it exists
-                if (expressionAnimations[expr]) {
+                // Preload idle GIF if it exists
+                if (idleAnimations[expr]) {
                     const gif = new Image();
-                    gif.onload = () => log(`Loaded GIF: ${expr}`);
-                    gif.onerror = () => log(`Missing GIF: ${expr}`, 'warn');
+                    gif.onload = () => log(`Loaded idle GIF: ${expr}`);
+                    gif.onerror = () => log(`Missing idle GIF: ${expr}`, 'warn');
                     gif.src = `/agents/${agentName}/expressions/${expr}.gif`;
-                    preloadedGifs[expr] = gif;
+                    preloadedIdleGifs[expr] = gif;
+                }
+                
+                // Preload speaking GIF if it exists
+                if (speakingAnimations[expr]) {
+                    const gif = new Image();
+                    gif.onload = () => log(`Loaded speaking GIF: ${expr}`);
+                    gif.onerror = () => log(`Missing speaking GIF: ${expr}`, 'warn');
+                    gif.src = `/agents/${agentName}/expressions/${expr}_speaking.gif`;
+                    preloadedSpeakingGifs[expr] = gif;
                 }
             });
         }
@@ -166,9 +177,11 @@
                     if (response.ok) {
                         const data = await response.json();
                         expressions = data.expressions || expressions;
-                        expressionAnimations = data.animations || {};
-                        const animatedCount = Object.values(expressionAnimations).filter(v => v).length;
-                        log(`Loaded ${expressions.length} expressions (${animatedCount} animated): ${expressions.join(', ')}`);
+                        idleAnimations = data.idle_animations || {};
+                        speakingAnimations = data.speaking_animations || {};
+                        const idleCount = Object.values(idleAnimations).filter(v => v).length;
+                        const speakingCount = Object.values(speakingAnimations).filter(v => v).length;
+                        log(`Loaded ${expressions.length} expressions (${idleCount} idle, ${speakingCount} speaking): ${expressions.join(', ')}`);
                     }
                 } catch (e) {
                     log(`Failed to load expressions: ${e.message}`, 'error');
@@ -215,63 +228,83 @@
         let pendingExpression = 'interested'; // Expression to show after speaking ends
         
         function setExpression(expression, isAutomatic = false) {
-            // If the LLM sets an expression while we're speaking, remember it for later
-            // but don't change the visual - keep showing "speaking"
-            if (!isAutomatic && expression !== 'speaking' && isSpeaking) {
-                pendingExpression = expression;
-                log(`Expression queued (speaking): ${expression} - will show after speaking`);
-                return; // Don't change visual while speaking
+            // Ignore legacy "speaking" expression - we now use per-expression speaking animations
+            if (expression === 'speaking') {
+                return;
             }
             
-            // Track non-speaking expressions so we can restore them
-            if (expression !== 'speaking' && !isAutomatic) {
+            // If the LLM sets an expression while we're speaking, update immediately
+            // (we'll switch to the speaking variant of the new expression)
+            if (!isAutomatic) {
                 pendingExpression = expression;
             }
             
-            // Check if this expression has an animated GIF
-            const hasAnimation = expressionAnimations[expression];
-            let usedGif = false;
+            // Check if we have this expression
+            const hasImage = preloadedImages[expression] && preloadedImages[expression].complete && preloadedImages[expression].naturalWidth > 0;
+            const hasIdleGif = preloadedIdleGifs[expression] && preloadedIdleGifs[expression].complete && preloadedIdleGifs[expression].naturalWidth > 0;
+            const hasSpeakingGif = preloadedSpeakingGifs[expression] && preloadedSpeakingGifs[expression].complete && preloadedSpeakingGifs[expression].naturalWidth > 0;
+            
             let usedFallback = false;
             
-            // Check if we have the image preloaded (means it exists)
-            const hasImage = preloadedImages[expression] && preloadedImages[expression].complete && preloadedImages[expression].naturalWidth > 0;
-            const hasGif = preloadedGifs[expression] && preloadedGifs[expression].complete && preloadedGifs[expression].naturalWidth > 0;
-            
-            // If we don't have this expression, fall back to neutral
-            if (!hasImage && !hasGif && expression !== 'neutral') {
+            // If we don't have this expression at all, fall back to neutral
+            if (!hasImage && !hasIdleGif && expression !== 'neutral') {
                 log(`Expression "${expression}" not found, falling back to neutral`);
                 expression = 'neutral';
                 usedFallback = true;
             }
             
-            // Prefer GIF if available and preloaded
-            if (hasAnimation && hasGif) {
-                avatar.src = preloadedGifs[expression].src;
-                usedGif = true;
-            } else if (hasAnimation && agentName && !usedFallback) {
-                // Try loading GIF directly (only if not already falling back)
-                avatar.src = `/agents/${agentName}/expressions/${expression}.gif`;
-                usedGif = true;
-            } else if (hasImage) {
-                // Fall back to preloaded PNG
-                avatar.src = preloadedImages[expression].src;
-            } else if (agentName) {
-                // Fallback to loading PNG directly
-                avatar.src = `/agents/${agentName}/expressions/${expression}.png`;
+            // Determine which asset to use based on speaking state
+            let assetType = 'PNG';
+            
+            if (isSpeaking) {
+                // When speaking, prefer speaking GIF > idle GIF > PNG
+                if (speakingAnimations[expression] && (hasSpeakingGif || !usedFallback)) {
+                    if (hasSpeakingGif) {
+                        avatar.src = preloadedSpeakingGifs[expression].src;
+                    } else {
+                        avatar.src = `/agents/${agentName}/expressions/${expression}_speaking.gif`;
+                    }
+                    assetType = 'speaking GIF';
+                } else if (idleAnimations[expression] && (hasIdleGif || !usedFallback)) {
+                    // Fallback to idle GIF if no speaking GIF
+                    if (hasIdleGif) {
+                        avatar.src = preloadedIdleGifs[expression].src;
+                    } else {
+                        avatar.src = `/agents/${agentName}/expressions/${expression}.gif`;
+                    }
+                    assetType = 'idle GIF (no speaking)';
+                } else if (hasImage) {
+                    avatar.src = preloadedImages[expression].src;
+                } else if (agentName) {
+                    avatar.src = `/agents/${agentName}/expressions/${expression}.png`;
+                }
             } else {
-                // Fallback to static paths (legacy)
-                const fallbackPaths = {
-                    'neutral': '/static/avatar-neutral.png',
-                    'happy': '/static/avatar-happy.png',
-                    'thinking': '/static/avatar-thinking.png',
-                    'speaking': '/static/avatar-speaking.png',
-                    'interested': '/static/avatar-neutral.png'
-                };
-                avatar.src = fallbackPaths[expression] || fallbackPaths['neutral'];
+                // When not speaking (listening), prefer idle GIF > PNG
+                if (idleAnimations[expression] && (hasIdleGif || !usedFallback)) {
+                    if (hasIdleGif) {
+                        avatar.src = preloadedIdleGifs[expression].src;
+                    } else {
+                        avatar.src = `/agents/${agentName}/expressions/${expression}.gif`;
+                    }
+                    assetType = 'idle GIF';
+                } else if (hasImage) {
+                    avatar.src = preloadedImages[expression].src;
+                } else if (agentName) {
+                    avatar.src = `/agents/${agentName}/expressions/${expression}.png`;
+                } else {
+                    // Fallback to static paths (legacy)
+                    const fallbackPaths = {
+                        'neutral': '/static/avatar-neutral.png',
+                        'happy': '/static/avatar-happy.png',
+                        'thinking': '/static/avatar-thinking.png',
+                        'interested': '/static/avatar-neutral.png'
+                    };
+                    avatar.src = fallbackPaths[expression] || fallbackPaths['neutral'];
+                }
             }
             
             currentExpression = expression;
-            log(`Expression: ${expression}${isAutomatic ? ' (auto)' : ''} ${usedGif ? '(GIF)' : '(PNG)'}${usedFallback ? ' (fallback)' : ''}`);
+            log(`Expression: ${expression}${isAutomatic ? ' (auto)' : ''} (${assetType})${usedFallback ? ' (fallback)' : ''}`);
         }
         
         function setHandRaised(raised) {
@@ -283,14 +316,10 @@
             avatar.classList.toggle('speaking', speaking);
             avatar.classList.toggle('listening', !speaking && isConnected);
             
-            // Automatically change expression based on speaking state
-            if (speaking) {
-                // Agent started speaking - switch to speaking expression
-                setExpression('speaking', true);
-            } else {
-                // Agent stopped speaking - restore the pending expression
-                setExpression(pendingExpression || 'interested', true);
-            }
+            // Re-apply current expression with new speaking state
+            // This will switch between idle and speaking variants of the same expression
+            const expressionToUse = pendingExpression || currentExpression || 'neutral';
+            setExpression(expressionToUse, true);
         }
         
         // Connect to our server for context updates (Recall.ai transcription)

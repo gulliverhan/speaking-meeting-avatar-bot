@@ -964,24 +964,38 @@ async def get_agent_expressions(agent_name: str):
         agent_name: Name of the agent.
 
     Returns:
-        List of expression names and which have animations.
+        List of expression names and which have idle/speaking animations.
     """
     from pathlib import Path
     
     if agent_name not in list_agent_names():
-        return {"expressions": ["neutral", "speaking"], "animations": {}}  # Fallback
+        return {
+            "expressions": ["neutral"],
+            "idle_animations": {},
+            "speaking_animations": {},
+        }  # Fallback
     
     agent_config = get_agent_config(agent_name)
-    expressions = agent_config.get("expressions", ["neutral", "happy", "thinking", "interested", "speaking"])
+    expressions = agent_config.get("expressions", ["neutral", "happy", "thinking", "interested"])
+    
+    # Filter out "speaking" from expressions list (it's no longer a separate expression)
+    expressions = [e for e in expressions if e != "speaking"]
     
     # Check which expressions have animated GIFs
     expressions_path = Path("agents") / agent_name / "expressions"
-    animations = {}
+    idle_animations = {}
+    speaking_animations = {}
     for expr in expressions:
-        gif_path = expressions_path / f"{expr}.gif"
-        animations[expr] = gif_path.exists()
+        idle_gif_path = expressions_path / f"{expr}.gif"
+        speaking_gif_path = expressions_path / f"{expr}_speaking.gif"
+        idle_animations[expr] = idle_gif_path.exists()
+        speaking_animations[expr] = speaking_gif_path.exists()
     
-    return {"expressions": expressions, "animations": animations}
+    return {
+        "expressions": expressions,
+        "idle_animations": idle_animations,
+        "speaking_animations": speaking_animations,
+    }
 
 
 @router.get(
@@ -1007,21 +1021,27 @@ async def get_agents_avatar_status():
         # Get list of expressions from config or default
         expressions = agent_config.get("expressions", ["neutral", "happy", "thinking", "interested"])
         
+        # Filter out "speaking" from expressions list (it's no longer a separate expression)
+        expressions = [e for e in expressions if e != "speaking"]
+        
         # Check which expression images and animations exist
         expression_images = {}
-        expression_animations = {}
+        expression_idle_animations = {}
+        expression_speaking_animations = {}
         has_base = False
         for expr in expressions:
             img_path = expressions_path / f"{expr}.png"
-            gif_path = expressions_path / f"{expr}.gif"
+            idle_gif_path = expressions_path / f"{expr}.gif"
+            speaking_gif_path = expressions_path / f"{expr}_speaking.gif"
             if img_path.exists():
                 expression_images[expr] = True
                 if expr == "neutral":
                     has_base = True
             else:
                 expression_images[expr] = False
-            # Check for animation GIF
-            expression_animations[expr] = gif_path.exists()
+            # Check for idle and speaking animation GIFs
+            expression_idle_animations[expr] = idle_gif_path.exists()
+            expression_speaking_animations[expr] = speaking_gif_path.exists()
         
         # Check if base.png exists (the reference image for expressions)
         base_path = expressions_path / "base.png"
@@ -1051,7 +1071,8 @@ async def get_agents_avatar_status():
             "display_name": agent_config.get("name", agent_name.replace("_", " ").title()),
             "expressions": expressions,
             "expression_images": expression_images,
-            "expression_animations": expression_animations,  # Track which have GIF animations
+            "expression_idle_animations": expression_idle_animations,  # Track which have idle GIFs
+            "expression_speaking_animations": expression_speaking_animations,  # Track which have speaking GIFs
             "has_base_avatar": has_base,
             "base_image_url": base_image_url,  # URL to display base image
             "avatar_prompt": avatar_prompt,
@@ -1703,6 +1724,46 @@ async def get_expression_animation(agent_name: str, expression: str):
     return FileResponse(gif_path, media_type="image/gif")
 
 
+def _load_agent_animation_prompts(agent_name: str) -> dict:
+    """Load custom animation prompts for an agent."""
+    import yaml
+    from pathlib import Path
+    
+    prompts_path = Path("agents") / agent_name / "custom_animation_prompts.yaml"
+    if prompts_path.exists():
+        try:
+            return yaml.safe_load(prompts_path.read_text()) or {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_agent_animation_prompt(agent_name: str, expression: str, prompt: str) -> None:
+    """Save a custom animation prompt for an agent's expression."""
+    import yaml
+    from pathlib import Path
+    
+    prompts_path = Path("agents") / agent_name / "custom_animation_prompts.yaml"
+    prompts = _load_agent_animation_prompts(agent_name)
+    prompts[expression] = prompt
+    prompts_path.write_text(yaml.dump(prompts, default_flow_style=False))
+
+
+def _get_speaking_prompt_from_idle(idle_prompt: str, expression: str) -> str:
+    """Convert an idle prompt to a speaking prompt by adding speaking modifiers."""
+    # Get the speaking-specific additions from the default prompts
+    default_idle = get_animation_prompt(expression, "idle")
+    default_speaking = get_animation_prompt(expression, "speaking")
+    
+    # If they customized the idle prompt, append speaking modifiers
+    if idle_prompt != default_idle:
+        # Add speaking motion to their custom prompt
+        return f"{idle_prompt}, talking with natural mouth movements and speech gestures"
+    else:
+        # Use the default speaking prompt
+        return default_speaking
+
+
 @router.post(
     "/agents/{agent_name}/generate-animation",
     tags=["agents"],
@@ -1710,12 +1771,12 @@ async def get_expression_animation(agent_name: str, expression: str):
 async def generate_expression_animation_endpoint(agent_name: str, request: Request):
     """Generate an animated GIF for an expression.
 
-    Uses bytedance/seedance-1-pro-fast to create a talking animation from
+    Uses bytedance/seedance-1-pro-fast to create an animation from
     a static expression image, then converts to a looping GIF.
 
     Args:
         agent_name: Name of the agent.
-        request: Request with expression name, animation prompt, and duration.
+        request: Request with expression name, animation_type (idle/speaking), prompt, and duration.
 
     Returns:
         Generated animation info.
@@ -1727,7 +1788,8 @@ async def generate_expression_animation_endpoint(agent_name: str, request: Reque
     try:
         body = await request.json()
         expression = body.get("expression", "")
-        prompt = body.get("prompt", "the person is talking")
+        animation_type = body.get("animation_type", "idle")  # "idle" or "speaking"
+        prompt = body.get("prompt", "")
         duration = body.get("duration", 2)  # Default 2 seconds
     except Exception:
         return JSONResponse(
@@ -1738,6 +1800,12 @@ async def generate_expression_animation_endpoint(agent_name: str, request: Reque
     if not expression:
         return JSONResponse(
             content={"message": "expression is required"},
+            status_code=400,
+        )
+    
+    if animation_type not in ("idle", "speaking"):
+        return JSONResponse(
+            content={"message": "animation_type must be 'idle' or 'speaking'"},
             status_code=400,
         )
     
@@ -1764,9 +1832,22 @@ async def generate_expression_animation_endpoint(agent_name: str, request: Reque
             status_code=500,
         )
     
-    output_gif_path = Path("agents") / agent_name / "expressions" / f"{expression}.gif"
+    # Use default prompt if not provided
+    if not prompt:
+        prompt = get_animation_prompt(expression, animation_type)
     
-    logger.info(f"Generating {duration}s animation for {agent_name}/{expression}: {prompt[:50]}...")
+    # Save custom prompt when generating idle animation (for later speaking derivation)
+    if animation_type == "idle" and prompt:
+        _save_agent_animation_prompt(agent_name, expression, prompt)
+        logger.info(f"Saved custom idle prompt for {agent_name}/{expression}")
+    
+    # Output path depends on animation type
+    if animation_type == "speaking":
+        output_gif_path = Path("agents") / agent_name / "expressions" / f"{expression}_speaking.gif"
+    else:
+        output_gif_path = Path("agents") / agent_name / "expressions" / f"{expression}.gif"
+    
+    logger.info(f"Generating {duration}s {animation_type} animation for {agent_name}/{expression}: {prompt[:50]}...")
     
     try:
         result = await generate_expression_animation(
@@ -1781,6 +1862,7 @@ async def generate_expression_animation_endpoint(agent_name: str, request: Reque
             return {
                 "success": True,
                 "expression": expression,
+                "animation_type": animation_type,
                 "gif_path": str(output_gif_path),
                 "prompt": prompt,
             }
@@ -1801,20 +1883,42 @@ async def generate_expression_animation_endpoint(agent_name: str, request: Reque
     "/agents/{agent_name}/expressions/{expression}/animation-prompt",
     tags=["agents"],
 )
-async def get_expression_animation_prompt(agent_name: str, expression: str):
-    """Get the default animation prompt for an expression.
+async def get_expression_animation_prompt_endpoint(agent_name: str, expression: str, animation_type: str = "idle"):
+    """Get the animation prompt for an expression.
+
+    For idle animations, returns saved custom prompt or default.
+    For speaking animations, derives from saved idle prompt + speaking modifiers.
 
     Args:
         agent_name: Name of the agent.
         expression: Expression name.
+        animation_type: Either 'idle' or 'speaking'.
 
     Returns:
-        Default animation prompt for this expression.
+        Animation prompt for this expression and type.
     """
-    prompt = get_animation_prompt(expression)
+    if animation_type not in ("idle", "speaking"):
+        animation_type = "idle"
+    
+    # Load any saved custom prompts for this agent
+    custom_prompts = _load_agent_animation_prompts(agent_name)
+    saved_idle_prompt = custom_prompts.get(expression)
+    
+    if animation_type == "idle":
+        # Return saved custom prompt or default
+        prompt = saved_idle_prompt or get_animation_prompt(expression, "idle")
+    else:
+        # For speaking, derive from saved idle prompt if available
+        if saved_idle_prompt:
+            prompt = _get_speaking_prompt_from_idle(saved_idle_prompt, expression)
+        else:
+            prompt = get_animation_prompt(expression, "speaking")
+    
     return {
         "expression": expression,
+        "animation_type": animation_type,
         "prompt": prompt,
+        "has_custom_idle": saved_idle_prompt is not None,
     }
 
 
@@ -1822,12 +1926,13 @@ async def get_expression_animation_prompt(agent_name: str, expression: str):
     "/agents/{agent_name}/expressions/{expression}/animation",
     tags=["agents"],
 )
-async def delete_expression_animation(agent_name: str, expression: str):
+async def delete_expression_animation(agent_name: str, expression: str, animation_type: str = "idle"):
     """Delete an animated GIF for an expression.
 
     Args:
         agent_name: Name of the agent.
         expression: Expression name.
+        animation_type: Either 'idle' or 'speaking'.
 
     Returns:
         Deletion status.
@@ -1841,20 +1946,28 @@ async def delete_expression_animation(agent_name: str, expression: str):
             status_code=404,
         )
     
-    gif_path = Path("agents") / agent_name / "expressions" / f"{expression}.gif"
+    if animation_type not in ("idle", "speaking"):
+        animation_type = "idle"
+    
+    # Determine gif path based on animation type
+    if animation_type == "speaking":
+        gif_path = Path("agents") / agent_name / "expressions" / f"{expression}_speaking.gif"
+    else:
+        gif_path = Path("agents") / agent_name / "expressions" / f"{expression}.gif"
     
     if not gif_path.exists():
         return JSONResponse(
-            content={"message": "Animation not found"},
+            content={"message": f"{animation_type.capitalize()} animation not found"},
             status_code=404,
         )
     
     try:
         gif_path.unlink()
-        logger.info(f"Deleted animation: {gif_path}")
+        logger.info(f"Deleted {animation_type} animation: {gif_path}")
         return {
             "success": True,
             "expression": expression,
+            "animation_type": animation_type,
             "deleted": str(gif_path),
         }
     except Exception as e:
@@ -1863,3 +1976,31 @@ async def delete_expression_animation(agent_name: str, expression: str):
             content={"message": f"Error deleting animation: {str(e)}"},
             status_code=500,
         )
+
+
+@router.get(
+    "/agents/{agent_name}/expressions/{expression}_speaking.gif",
+    tags=["agents"],
+)
+async def get_speaking_animation(agent_name: str, expression: str):
+    """Serve a speaking animated GIF for an expression.
+
+    Args:
+        agent_name: Name of the agent.
+        expression: Expression name (e.g., "neutral", "happy").
+
+    Returns:
+        The speaking animated GIF file.
+    """
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+    
+    gif_path = Path("agents") / agent_name / "expressions" / f"{expression}_speaking.gif"
+    
+    if not gif_path.exists():
+        return JSONResponse(
+            content={"message": "Speaking animation not found"},
+            status_code=404,
+        )
+    
+    return FileResponse(gif_path, media_type="image/gif")
